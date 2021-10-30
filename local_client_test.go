@@ -1,4 +1,4 @@
-package httpdog_test
+package httpsteps_test
 
 import (
 	"bytes"
@@ -9,7 +9,7 @@ import (
 
 	"github.com/bool64/httpmock"
 	"github.com/cucumber/godog"
-	httpdog "github.com/godogx/httpsteps"
+	httpsteps "github.com/godogx/httpsteps"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -24,11 +24,13 @@ func TestLocal_RegisterSteps(t *testing.T) {
 	concurrencyLevel := 5
 	setExpectations(mock, concurrencyLevel)
 
-	local := httpdog.NewLocalClient(srvURL)
-	local.Headers = map[string]string{
-		"X-Foo": "bar",
-	}
-	local.ConcurrencyLevel = concurrencyLevel
+	local := httpsteps.NewLocalClient(srvURL, func(client *httpmock.Client) {
+		client.Headers = map[string]string{
+			"X-Foo": "bar",
+		}
+		client.ConcurrencyLevel = concurrencyLevel
+	})
+	local.AddService("some-service", srvURL)
 
 	suite := godog.TestSuite{
 		ScenarioInitializer: func(s *godog.ScenarioContext) {
@@ -107,7 +109,7 @@ func setExpectations(mock *httpmock.Server, concurrencyLevel int) {
 		mock.Expect(delNotFound)
 	}
 
-	// Expecting request containing json5 comments
+	// Expecting request containing json5 comments.
 	mock.Expect(httpmock.Expectation{
 		Method:     http.MethodPost,
 		RequestURI: "/with-json5-body",
@@ -121,12 +123,22 @@ func setExpectations(mock *httpmock.Server, concurrencyLevel int) {
 		},
 	})
 
-	// Expecting request does not contain a valid json
+	// Expecting request does not contain a valid json.
 	mock.Expect(httpmock.Expectation{
 		Method:       http.MethodGet,
 		RequestURI:   "/with-csv-body",
 		RequestBody:  []byte(`a,b,c`),
 		ResponseBody: []byte(`a,b,c`),
+	})
+
+	// Expecting request for "Successful call against named service".
+	mock.Expect(httpmock.Expectation{
+		Method:       http.MethodGet,
+		RequestURI:   "/get-something?foo=bar",
+		ResponseBody: []byte(`[{"some":"json"}]`),
+		ResponseHeader: map[string]string{
+			"Content-Type": "application/json",
+		},
 	})
 }
 
@@ -159,8 +171,9 @@ func TestLocal_RegisterSteps_unexpectedOtherResp(t *testing.T) {
 		mock.Expect(delNotFound)
 	}
 
-	local := httpdog.NewLocalClient(srvURL)
-	local.ConcurrencyLevel = concurrencyLevel
+	local := httpsteps.NewLocalClient(srvURL, func(client *httpmock.Client) {
+		client.ConcurrencyLevel = concurrencyLevel
+	})
 	out := bytes.NewBuffer(nil)
 
 	suite := godog.TestSuite{
@@ -178,7 +191,7 @@ func TestLocal_RegisterSteps_unexpectedOtherResp(t *testing.T) {
 
 	assert.Equal(t, 1, suite.Run())
 	assert.NoError(t, mock.ExpectationsWereMet())
-	assert.Contains(t, out.String(), "Error: after scenario hook failed: no other responses expected: unexpected response status, expected: 204 (No Content), received: 404 (Not Found)")
+	assert.Contains(t, out.String(), "Error: after scenario hook failed: no other responses expected for default: unexpected response status, expected: 204 (No Content), received: 404 (Not Found)")
 }
 
 func TestLocal_RegisterSteps_dynamic(t *testing.T) {
@@ -205,7 +218,7 @@ func TestLocal_RegisterSteps_dynamic(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	local := httpdog.NewLocalClient(srv.URL)
+	local := httpsteps.NewLocalClient(srv.URL)
 
 	suite := godog.TestSuite{
 		ScenarioInitializer: func(s *godog.ScenarioContext) {

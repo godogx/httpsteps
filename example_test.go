@@ -1,4 +1,4 @@
-package httpdog_test
+package httpsteps_test
 
 import (
 	"fmt"
@@ -7,11 +7,11 @@ import (
 	"net/http/httptest"
 
 	"github.com/cucumber/godog"
-	httpdog "github.com/godogx/httpsteps"
+	httpsteps "github.com/godogx/httpsteps"
 )
 
 func ExampleNewLocalClient() {
-	external := httpdog.ExternalServer{}
+	external := httpsteps.ExternalServer{}
 	templateService := external.Add("template-service")
 
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -25,7 +25,7 @@ func ExampleNewLocalClient() {
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
-	local := httpdog.NewLocalClient(srv.URL)
+	local := httpsteps.NewLocalClient(srv.URL)
 
 	suite := godog.TestSuite{
 		ScenarioInitializer: func(s *godog.ScenarioContext) {

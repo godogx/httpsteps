@@ -1,4 +1,4 @@
-package httpdog
+package httpsteps
 
 import (
 	"bytes"
@@ -17,26 +17,34 @@ import (
 	"github.com/swaggest/assertjson/json5"
 )
 
-// NewLocalClient creates an instance of step-driven HTTP client.
-func NewLocalClient(baseURL string) *LocalClient {
-	if !strings.HasPrefix(baseURL, "http://") && !strings.HasPrefix(baseURL, "https://") {
-		baseURL = "http://" + baseURL
+const defaultService = "default"
+
+// NewLocalClient creates an instance of step-driven HTTP Service.
+func NewLocalClient(defaultBaseURL string, options ...func(*httpmock.Client)) *LocalClient {
+	if !strings.HasPrefix(defaultBaseURL, "http://") && !strings.HasPrefix(defaultBaseURL, "https://") {
+		defaultBaseURL = "http://" + defaultBaseURL
 	}
 
-	baseURL = strings.TrimRight(baseURL, "/")
+	defaultBaseURL = strings.TrimRight(defaultBaseURL, "/")
 
 	l := LocalClient{
-		Client: httpmock.NewClient(baseURL),
+		services: map[string]*httpmock.Client{
+			defaultService: makeClient(defaultBaseURL, options),
+		},
 	}
-
-	l.JSONComparer.Vars = &shared.Vars{}
 
 	return &l
 }
 
-// LocalClient is step-driven HTTP client for application local HTTP service.
+// LocalClient is step-driven HTTP Service for application local HTTP service.
 type LocalClient struct {
-	*httpmock.Client
+	services map[string]*httpmock.Client
+	options  []func(*httpmock.Client)
+}
+
+// AddService registers a URL for named service.
+func (l *LocalClient) AddService(name, baseURL string) {
+	l.services[name] = makeClient(baseURL, l.options)
 }
 
 // RegisterSteps adds HTTP server steps to godog scenario context.
@@ -45,21 +53,25 @@ type LocalClient struct {
 //
 // Request configuration needs at least HTTP method and URI.
 //
-//		When I request(.*) HTTP endpoint with method "GET" and URI "/get-something?foo=bar"
+//		When I request HTTP endpoint with method "GET" and URI "/get-something?foo=bar"
 //
+// Configuration can be bound to a specific named service. This service must be registered before.
+// Service name should be added before `HTTP endpoint`.
+//
+//	    And I request "some-service" HTTP endpoint with header "X-Foo: bar"
 //
 // An additional header can be supplied. For multiple headers, call step multiple times.
 //
-//		And I request(.*) HTTP endpoint with header "X-Foo: bar"
+//		And I request HTTP endpoint with header "X-Foo: bar"
 //
 // An additional cookie can be supplied. For multiple cookie, call step multiple times.
 //
-//		And I request(.*) HTTP endpoint with cookie "name: value"
+//		And I request HTTP endpoint with cookie "name: value"
 //
 // Optionally request body can be configured. If body is a valid JSON5 payload, it will be converted to JSON before use.
 // Otherwise, body is used as is.
 //
-//		And I request(.*) HTTP endpoint with body
+//		And I request HTTP endpoint with body
 //		"""
 //		[
 //		 // JSON5 comments are allowed.
@@ -69,7 +81,7 @@ type LocalClient struct {
 //
 // Request body can be provided from file.
 //
-//		And I request(.*) HTTP endpoint with body from file
+//		And I request HTTP endpoint with body from file
 //		"""
 //		path/to/file.json5
 //		"""
@@ -109,7 +121,7 @@ type LocalClient struct {
 //		path/to/file.json
 //		"""
 //
-// Status can be defined with either phrase or numeric code. Also you can set response header expectations.
+// Status can be defined with either phrase or numeric code. Also, you can set response header expectations.
 //
 //		Then I should have response with status "OK"
 //		And I should have response with header "Content-Type: application/json"
@@ -137,20 +149,24 @@ type LocalClient struct {
 //		"""
 func (l *LocalClient) RegisterSteps(s *godog.ScenarioContext) {
 	s.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
-		l.Reset()
+		for _, c := range l.services {
+			c.Reset()
 
-		if l.JSONComparer.Vars != nil {
-			l.JSONComparer.Vars.Reset()
+			if c.JSONComparer.Vars != nil {
+				c.JSONComparer.Vars.Reset()
+			}
 		}
 
 		return ctx, nil
 	})
 
 	s.After(func(ctx context.Context, sc *godog.Scenario, err error) (context.Context, error) {
-		if err := l.CheckUnexpectedOtherResponses(); err != nil {
-			err = fmt.Errorf("no other responses expected: %w", err)
+		for srv, c := range l.services {
+			if err := c.CheckUnexpectedOtherResponses(); err != nil {
+				err = fmt.Errorf("no other responses expected for %s: %w", srv, err)
 
-			return ctx, err
+				return ctx, err
+			}
 		}
 
 		return ctx, nil
@@ -176,15 +192,20 @@ func (l *LocalClient) RegisterSteps(s *godog.ScenarioContext) {
 }
 
 func (l *LocalClient) iRequestWithMethodAndURI(service, method, uri string) error {
-	if err := l.CheckUnexpectedOtherResponses(); err != nil {
+	c, err := l.Service(service)
+	if err != nil {
+		return err
+	}
+
+	if err := c.CheckUnexpectedOtherResponses(); err != nil {
 		return fmt.Errorf("unexpected other responses for previous request: %w", err)
 	}
 
 	uri = strings.Trim(uri, `"`)
 
-	l.Reset()
-	l.WithMethod(method)
-	l.WithURI(uri)
+	c.Reset()
+	c.WithMethod(method)
+	c.WithURI(uri)
 
 	return nil
 }
@@ -222,33 +243,53 @@ func loadBody(body []byte, vars *shared.Vars) ([]byte, error) {
 }
 
 func (l *LocalClient) iRequestWithBodyFromFile(service string, filePath string) error {
-	body, err := loadBodyFromFile(filePath, l.JSONComparer.Vars)
+	c, err := l.Service(service)
+	if err != nil {
+		return err
+	}
+
+	body, err := loadBodyFromFile(filePath, c.JSONComparer.Vars)
 
 	if err == nil {
-		l.WithBody(body)
+		c.WithBody(body)
 	}
 
 	return err
 }
 
 func (l *LocalClient) iRequestWithBody(service string, bodyDoc string) error {
-	body, err := loadBody([]byte(bodyDoc), l.JSONComparer.Vars)
+	c, err := l.Service(service)
+	if err != nil {
+		return err
+	}
+
+	body, err := loadBody([]byte(bodyDoc), c.JSONComparer.Vars)
 
 	if err == nil {
-		l.WithBody(body)
+		c.WithBody(body)
 	}
 
 	return err
 }
 
 func (l *LocalClient) iRequestWithHeader(service, key, value string) error {
-	l.WithHeader(key, value)
+	c, err := l.Service(service)
+	if err != nil {
+		return err
+	}
+
+	c.WithHeader(key, value)
 
 	return nil
 }
 
 func (l *LocalClient) iRequestWithCookie(service, name, value string) error {
-	l.WithCookie(name, value)
+	c, err := l.Service(service)
+	if err != nil {
+		return err
+	}
+
+	c.WithCookie(name, value)
 
 	return nil
 }
@@ -279,71 +320,144 @@ func statusCode(statusOrCode string) (int, error) {
 }
 
 func (l *LocalClient) iShouldHaveOtherResponsesWithStatus(service, statusOrCode string) error {
+	c, err := l.Service(service)
+	if err != nil {
+		return err
+	}
+
 	code, err := statusCode(statusOrCode)
 	if err != nil {
 		return err
 	}
 
-	return l.ExpectOtherResponsesStatus(code)
+	return c.ExpectOtherResponsesStatus(code)
 }
 
 func (l *LocalClient) iShouldHaveResponseWithStatus(service, statusOrCode string) error {
+	c, err := l.Service(service)
+	if err != nil {
+		return err
+	}
+
 	code, err := statusCode(statusOrCode)
 	if err != nil {
 		return err
 	}
 
-	return l.ExpectResponseStatus(code)
+	return c.ExpectResponseStatus(code)
 }
 
 func (l *LocalClient) iShouldHaveOtherResponsesWithHeader(service, key, value string) error {
-	return l.ExpectOtherResponsesHeader(key, value)
+	c, err := l.Service(service)
+	if err != nil {
+		return err
+	}
+
+	return c.ExpectOtherResponsesHeader(key, value)
 }
 
 func (l *LocalClient) iShouldHaveResponseWithHeader(service, key, value string) error {
-	return l.ExpectResponseHeader(key, value)
+	c, err := l.Service(service)
+	if err != nil {
+		return err
+	}
+
+	return c.ExpectResponseHeader(key, value)
 }
 
 func (l *LocalClient) iShouldHaveResponseWithBody(service, bodyDoc string) error {
-	body, err := loadBody([]byte(bodyDoc), l.JSONComparer.Vars)
+	c, err := l.Service(service)
 	if err != nil {
 		return err
 	}
 
-	return l.ExpectResponseBody(body)
+	body, err := loadBody([]byte(bodyDoc), c.JSONComparer.Vars)
+	if err != nil {
+		return err
+	}
+
+	return c.ExpectResponseBody(body)
 }
 
 func (l *LocalClient) iShouldHaveResponseWithBodyFromFile(service, filePath string) error {
-	body, err := loadBodyFromFile(filePath, l.JSONComparer.Vars)
+	c, err := l.Service(service)
 	if err != nil {
 		return err
 	}
 
-	return l.ExpectResponseBody(body)
+	body, err := loadBodyFromFile(filePath, c.JSONComparer.Vars)
+	if err != nil {
+		return err
+	}
+
+	return c.ExpectResponseBody(body)
 }
 
 func (l *LocalClient) iShouldHaveOtherResponsesWithBody(service, bodyDoc string) error {
-	body, err := loadBody([]byte(bodyDoc), l.JSONComparer.Vars)
+	c, err := l.Service(service)
 	if err != nil {
 		return err
 	}
 
-	return l.ExpectOtherResponsesBody(body)
+	body, err := loadBody([]byte(bodyDoc), c.JSONComparer.Vars)
+	if err != nil {
+		return err
+	}
+
+	return c.ExpectOtherResponsesBody(body)
 }
 
 func (l *LocalClient) iShouldHaveOtherResponsesWithBodyFromFile(service, filePath string) error {
-	body, err := loadBodyFromFile(filePath, l.JSONComparer.Vars)
+	c, err := l.Service(service)
 	if err != nil {
 		return err
 	}
 
-	return l.ExpectOtherResponsesBody(body)
+	body, err := loadBodyFromFile(filePath, c.JSONComparer.Vars)
+	if err != nil {
+		return err
+	}
+
+	return c.ExpectOtherResponsesBody(body)
 }
 
 func (l *LocalClient) iRequestWithConcurrency(service string) error {
-	l.Concurrently()
+	c, err := l.Service(service)
+	if err != nil {
+		return err
+	}
+
+	c.Concurrently()
 
 	return nil
+}
+
+func makeClient(baseURL string, options []func(client *httpmock.Client)) *httpmock.Client {
+	c := httpmock.NewClient(baseURL)
+
+	c.JSONComparer.Vars = &shared.Vars{}
+
+	for _, o := range options {
+		o(c)
+	}
+
+	return c
+}
+
+// Service returns named service client or fails for undefined service.
+func (l *LocalClient) Service(service string) (*httpmock.Client, error) {
+	service = strings.Trim(service, `" `)
+
+	if service == "" {
+		service = defaultService
+	}
+
+	c, found := l.services[service]
+	if !found {
+		return nil, fmt.Errorf("undefined service: %s", service)
+	}
+
+	return c, nil
 }
 
 var statusMap = map[string]int{}

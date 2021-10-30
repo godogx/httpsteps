@@ -1,4 +1,4 @@
-package httpdog_test
+package httpsteps_test
 
 import (
 	"bytes"
@@ -8,14 +8,14 @@ import (
 	"time"
 
 	"github.com/cucumber/godog"
-	httpdog "github.com/godogx/httpsteps"
+	httpsteps "github.com/godogx/httpsteps"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/swaggest/assertjson"
 )
 
 func TestRegisterExternal(t *testing.T) {
-	es := httpdog.ExternalServer{}
+	es := httpsteps.ExternalServer{}
 
 	someServiceURL := es.Add("some-service")
 	anotherServiceURL := es.Add("another-service")
