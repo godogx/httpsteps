@@ -1,4 +1,4 @@
-package httpdog
+package httpsteps
 
 import (
 	"context"

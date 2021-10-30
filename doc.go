@@ -1,4 +1,4 @@
-// Package httpdog provides HTTP-related step definitions for github.com/cucumber/godog.
+// Package httpsteps provides HTTP-related step definitions for github.com/cucumber/godog.
 //
 //		Feature: Example
 //
@@ -18,4 +18,4 @@
 //		   """
 //		   Hello, Jane!
 //		   """
-package httpdog
+package httpsteps

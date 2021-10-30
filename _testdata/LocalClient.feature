@@ -101,3 +101,17 @@ Feature: HTTP Service
     """
     _testdata/sample.csv
     """
+
+  Scenario: Successful call against named service
+    When I request "some-service" HTTP endpoint with method "GET" and URI "/get-something?foo=bar"
+
+    Then I should have "some-service" response with status "OK"
+
+    And I should have "some-service" response with body
+    """json
+    [
+      {"some":"json"}
+    ]
+    """
+
+    And I should have "some-service" response with header "Content-Type: application/json"

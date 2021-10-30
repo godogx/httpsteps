@@ -12,14 +12,25 @@ for [`github.com/cucumber/godog`](https://github.com/cucumber/godog).
 
 ## Steps
 
-### Local Service
+### Local Client 
 
-Local service can be tested with client request configuration and response expectations.
+Local and remote services can be tested with client request configuration and response expectations.
 
 #### Request Setup
 
 ```gherkin
 When I request HTTP endpoint with method "GET" and URI "/get-something?foo=bar"
+```
+
+In request configuration steps you can specify name of the service to apply configuration.
+If service name is omitted, default service (with URL passed to `NewLocalClient`) is used:
+* `request HTTP endpoint` - default service,
+* `request "some-service" HTTP endpoint` - service named `some-service`.
+
+Named services have to be explicitly added with their base URLs before running tests.
+
+```gherkin
+When I request "some-service" HTTP endpoint with method "GET" and URI "/get-something?foo=bar"
 ```
 
 An additional header can be supplied. For multiple headers, call step multiple times.
@@ -132,10 +143,20 @@ And I should have other responses with header "Content-Type: text/plain"
 And I should have other responses with header "X-Header: abc"
 ```
 
-### External Services
+You can set expectations for named service by adding service name before `response` or `other responses`:
+* `have response` - default,
+* `have other responses` - default,
+* `have "some-service" response` - service named `some-service`,
+* `have "some-service" other responses` - service named `some-service`.
 
-External Services mock creates a HTTP server for each of registered services and allows control of expected 
-requests and responses with gherkin steps. Please note, due to centralized nature of these mocks they can not be 
+### External Server
+
+External Server mock creates an HTTP server for each of registered services and allows control of expected 
+requests and responses with gherkin steps. 
+
+It is useful describe behavior of HTTP endpoints that are called by the app during test (e.g. 3rd party APIs).
+
+Please note, due to centralized nature of these mocks they can not be 
 used from concurrent scenarios, 
 so keep [`Concurrency`](https://pkg.go.dev/github.com/cucumber/godog@v0.12.0/internal/flags#Options) at 0 or 1. 
 
