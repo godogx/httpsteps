@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/bool64/httpmock"
 	"github.com/bool64/shared"
@@ -19,7 +20,7 @@ import (
 
 const defaultService = "default"
 
-// NewLocalClient creates an instance of step-driven HTTP Service.
+// NewLocalClient creates an instance of step-driven HTTP service.
 func NewLocalClient(defaultBaseURL string, options ...func(*httpmock.Client)) *LocalClient {
 	if !strings.HasPrefix(defaultBaseURL, "http://") && !strings.HasPrefix(defaultBaseURL, "https://") {
 		defaultBaseURL = "http://" + defaultBaseURL
@@ -31,21 +32,28 @@ func NewLocalClient(defaultBaseURL string, options ...func(*httpmock.Client)) *L
 		services: map[string]*httpmock.Client{
 			defaultService: makeClient(defaultBaseURL, options),
 		},
+		mu:    &sync.Mutex{},
+		locks: make(map[string]chan struct{}),
 	}
 
 	return &l
 }
 
-// LocalClient is step-driven HTTP Service for application local HTTP service.
+// LocalClient is step-driven HTTP service for application local HTTP service.
 type LocalClient struct {
 	services map[string]*httpmock.Client
 	options  []func(*httpmock.Client)
+
+	mu    *sync.Mutex
+	locks map[string]chan struct{}
 }
 
 // AddService registers a URL for named service.
 func (l *LocalClient) AddService(name, baseURL string) {
 	l.services[name] = makeClient(baseURL, l.options)
 }
+
+type ctxScenarioLockKey struct{}
 
 // RegisterSteps adds HTTP server steps to godog scenario context.
 //
@@ -56,7 +64,7 @@ func (l *LocalClient) AddService(name, baseURL string) {
 //		When I request HTTP endpoint with method "GET" and URI "/get-something?foo=bar"
 //
 // Configuration can be bound to a specific named service. This service must be registered before.
-// Service name should be added before `HTTP endpoint`.
+// service name should be added before `HTTP endpoint`.
 //
 //	    And I request "some-service" HTTP endpoint with header "X-Foo: bar"
 //
@@ -157,10 +165,23 @@ func (l *LocalClient) RegisterSteps(s *godog.ScenarioContext) {
 			}
 		}
 
-		return ctx, nil
+		// Adding unique pointer to context to avoid collisions.
+		return context.WithValue(ctx, ctxScenarioLockKey{}, make(chan struct{})), nil
 	})
 
 	s.After(func(ctx context.Context, sc *godog.Scenario, err error) (context.Context, error) {
+		// Releasing locks owned by scenario.
+		scenarioKey := ctx.Value(ctxScenarioLockKey{}).(chan struct{})
+		l.mu.Lock()
+		for srv := range l.services {
+			lock := l.locks[srv]
+			if lock == scenarioKey {
+				delete(l.locks, srv)
+			}
+		}
+		l.mu.Unlock()
+		close(scenarioKey)
+
 		for srv, c := range l.services {
 			if err := c.CheckUnexpectedOtherResponses(); err != nil {
 				err = fmt.Errorf("no other responses expected for %s: %w", srv, err)
@@ -191,8 +212,8 @@ func (l *LocalClient) RegisterSteps(s *godog.ScenarioContext) {
 	s.Step(`^I should have(.*) other responses with body from file$`, l.iShouldHaveOtherResponsesWithBodyFromFile)
 }
 
-func (l *LocalClient) iRequestWithMethodAndURI(service, method, uri string) error {
-	c, err := l.Service(service)
+func (l *LocalClient) iRequestWithMethodAndURI(ctx context.Context, service, method, uri string) error {
+	c, err := l.service(ctx, service)
 	if err != nil {
 		return err
 	}
@@ -242,8 +263,8 @@ func loadBody(body []byte, vars *shared.Vars) ([]byte, error) {
 	return body, nil
 }
 
-func (l *LocalClient) iRequestWithBodyFromFile(service string, filePath string) error {
-	c, err := l.Service(service)
+func (l *LocalClient) iRequestWithBodyFromFile(ctx context.Context, service string, filePath string) error {
+	c, err := l.service(ctx, service)
 	if err != nil {
 		return err
 	}
@@ -257,8 +278,8 @@ func (l *LocalClient) iRequestWithBodyFromFile(service string, filePath string) 
 	return err
 }
 
-func (l *LocalClient) iRequestWithBody(service string, bodyDoc string) error {
-	c, err := l.Service(service)
+func (l *LocalClient) iRequestWithBody(ctx context.Context, service string, bodyDoc string) error {
+	c, err := l.service(ctx, service)
 	if err != nil {
 		return err
 	}
@@ -272,8 +293,8 @@ func (l *LocalClient) iRequestWithBody(service string, bodyDoc string) error {
 	return err
 }
 
-func (l *LocalClient) iRequestWithHeader(service, key, value string) error {
-	c, err := l.Service(service)
+func (l *LocalClient) iRequestWithHeader(ctx context.Context, service, key, value string) error {
+	c, err := l.service(ctx, service)
 	if err != nil {
 		return err
 	}
@@ -283,8 +304,8 @@ func (l *LocalClient) iRequestWithHeader(service, key, value string) error {
 	return nil
 }
 
-func (l *LocalClient) iRequestWithCookie(service, name, value string) error {
-	c, err := l.Service(service)
+func (l *LocalClient) iRequestWithCookie(ctx context.Context, service, name, value string) error {
+	c, err := l.service(ctx, service)
 	if err != nil {
 		return err
 	}
@@ -319,8 +340,8 @@ func statusCode(statusOrCode string) (int, error) {
 	return int(code), nil
 }
 
-func (l *LocalClient) iShouldHaveOtherResponsesWithStatus(service, statusOrCode string) error {
-	c, err := l.Service(service)
+func (l *LocalClient) iShouldHaveOtherResponsesWithStatus(ctx context.Context, service, statusOrCode string) error {
+	c, err := l.service(ctx, service)
 	if err != nil {
 		return err
 	}
@@ -333,8 +354,8 @@ func (l *LocalClient) iShouldHaveOtherResponsesWithStatus(service, statusOrCode 
 	return c.ExpectOtherResponsesStatus(code)
 }
 
-func (l *LocalClient) iShouldHaveResponseWithStatus(service, statusOrCode string) error {
-	c, err := l.Service(service)
+func (l *LocalClient) iShouldHaveResponseWithStatus(ctx context.Context, service, statusOrCode string) error {
+	c, err := l.service(ctx, service)
 	if err != nil {
 		return err
 	}
@@ -347,8 +368,8 @@ func (l *LocalClient) iShouldHaveResponseWithStatus(service, statusOrCode string
 	return c.ExpectResponseStatus(code)
 }
 
-func (l *LocalClient) iShouldHaveOtherResponsesWithHeader(service, key, value string) error {
-	c, err := l.Service(service)
+func (l *LocalClient) iShouldHaveOtherResponsesWithHeader(ctx context.Context, service, key, value string) error {
+	c, err := l.service(ctx, service)
 	if err != nil {
 		return err
 	}
@@ -356,8 +377,8 @@ func (l *LocalClient) iShouldHaveOtherResponsesWithHeader(service, key, value st
 	return c.ExpectOtherResponsesHeader(key, value)
 }
 
-func (l *LocalClient) iShouldHaveResponseWithHeader(service, key, value string) error {
-	c, err := l.Service(service)
+func (l *LocalClient) iShouldHaveResponseWithHeader(ctx context.Context, service, key, value string) error {
+	c, err := l.service(ctx, service)
 	if err != nil {
 		return err
 	}
@@ -365,8 +386,8 @@ func (l *LocalClient) iShouldHaveResponseWithHeader(service, key, value string) 
 	return c.ExpectResponseHeader(key, value)
 }
 
-func (l *LocalClient) iShouldHaveResponseWithBody(service, bodyDoc string) error {
-	c, err := l.Service(service)
+func (l *LocalClient) iShouldHaveResponseWithBody(ctx context.Context, service, bodyDoc string) error {
+	c, err := l.service(ctx, service)
 	if err != nil {
 		return err
 	}
@@ -379,8 +400,8 @@ func (l *LocalClient) iShouldHaveResponseWithBody(service, bodyDoc string) error
 	return c.ExpectResponseBody(body)
 }
 
-func (l *LocalClient) iShouldHaveResponseWithBodyFromFile(service, filePath string) error {
-	c, err := l.Service(service)
+func (l *LocalClient) iShouldHaveResponseWithBodyFromFile(ctx context.Context, service, filePath string) error {
+	c, err := l.service(ctx, service)
 	if err != nil {
 		return err
 	}
@@ -393,8 +414,8 @@ func (l *LocalClient) iShouldHaveResponseWithBodyFromFile(service, filePath stri
 	return c.ExpectResponseBody(body)
 }
 
-func (l *LocalClient) iShouldHaveOtherResponsesWithBody(service, bodyDoc string) error {
-	c, err := l.Service(service)
+func (l *LocalClient) iShouldHaveOtherResponsesWithBody(ctx context.Context, service, bodyDoc string) error {
+	c, err := l.service(ctx, service)
 	if err != nil {
 		return err
 	}
@@ -407,8 +428,8 @@ func (l *LocalClient) iShouldHaveOtherResponsesWithBody(service, bodyDoc string)
 	return c.ExpectOtherResponsesBody(body)
 }
 
-func (l *LocalClient) iShouldHaveOtherResponsesWithBodyFromFile(service, filePath string) error {
-	c, err := l.Service(service)
+func (l *LocalClient) iShouldHaveOtherResponsesWithBodyFromFile(ctx context.Context, service, filePath string) error {
+	c, err := l.service(ctx, service)
 	if err != nil {
 		return err
 	}
@@ -421,8 +442,8 @@ func (l *LocalClient) iShouldHaveOtherResponsesWithBodyFromFile(service, filePat
 	return c.ExpectOtherResponsesBody(body)
 }
 
-func (l *LocalClient) iRequestWithConcurrency(service string) error {
-	c, err := l.Service(service)
+func (l *LocalClient) iRequestWithConcurrency(ctx context.Context, service string) error {
+	c, err := l.service(ctx, service)
 	if err != nil {
 		return err
 	}
@@ -444,8 +465,8 @@ func makeClient(baseURL string, options []func(client *httpmock.Client)) *httpmo
 	return c
 }
 
-// Service returns named service client or fails for undefined service.
-func (l *LocalClient) Service(service string) (*httpmock.Client, error) {
+// service returns named service client or fails for undefined service.
+func (l *LocalClient) service(ctx context.Context, service string) (*httpmock.Client, error) {
 	service = strings.Trim(service, `" `)
 
 	if service == "" {
@@ -455,6 +476,22 @@ func (l *LocalClient) Service(service string) (*httpmock.Client, error) {
 	c, found := l.services[service]
 	if !found {
 		return nil, fmt.Errorf("undefined service: %s", service)
+	}
+
+	currentLock := ctx.Value(ctxScenarioLockKey{}).(chan struct{})
+
+	l.mu.Lock()
+	lock := l.locks[service]
+	if lock == nil {
+		l.locks[service] = currentLock
+	}
+	l.mu.Unlock()
+
+	// Wait for the alien lock to be released.
+	if lock != nil && lock != currentLock {
+		<-lock
+
+		return l.service(ctx, service)
 	}
 
 	return c, nil
