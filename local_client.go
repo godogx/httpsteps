@@ -18,7 +18,17 @@ import (
 	"github.com/swaggest/assertjson/json5"
 )
 
-const defaultService = "default"
+type sentinelError string
+
+// Error returns the error message.
+func (e sentinelError) Error() string {
+	return string(e)
+}
+
+const (
+	defaultService         = "default"
+	errMissingScenarioLock = sentinelError("missing scenario lock key in context")
+)
 
 // NewLocalClient creates an instance of step-driven HTTP service.
 func NewLocalClient(defaultBaseURL string, options ...func(*httpmock.Client)) *LocalClient {
@@ -156,38 +166,38 @@ type ctxScenarioLockKey struct{}
 //		path/to/file.json
 //		"""
 func (l *LocalClient) RegisterSteps(s *godog.ScenarioContext) {
-	s.Before(func(ctx context.Context, _ *godog.Scenario) (context.Context, error) {
-		for _, c := range l.services {
-			c.Reset()
-
-			if c.JSONComparer.Vars != nil {
-				c.JSONComparer.Vars.Reset()
-			}
-		}
+	s.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
+		lock := make(chan struct{})
 
 		// Adding unique pointer to context to avoid collisions.
-		return context.WithValue(ctx, ctxScenarioLockKey{}, make(chan struct{})), nil
+		return context.WithValue(ctx, ctxScenarioLockKey{}, lock), nil
 	})
 
 	s.After(func(ctx context.Context, sc *godog.Scenario, err error) (context.Context, error) {
 		// Releasing locks owned by scenario.
-		scenarioKey := ctx.Value(ctxScenarioLockKey{}).(chan struct{})
+		currentLock, ok := ctx.Value(ctxScenarioLockKey{}).(chan struct{})
+		if !ok {
+			return ctx, errMissingScenarioLock
+		}
+
+		var errs []string
+
 		l.mu.Lock()
-		for srv := range l.services {
-			lock := l.locks[srv]
-			if lock == scenarioKey {
-				delete(l.locks, srv)
+		for service, c := range l.services {
+			lock := l.locks[service]
+			if lock == currentLock {
+				delete(l.locks, service)
+
+				if err := c.CheckUnexpectedOtherResponses(); err != nil {
+					errs = append(errs, fmt.Sprintf("no other responses expected for %s: %s", service, err.Error()))
+				}
 			}
 		}
 		l.mu.Unlock()
-		close(scenarioKey)
+		close(currentLock)
 
-		for srv, c := range l.services {
-			if err := c.CheckUnexpectedOtherResponses(); err != nil {
-				err = fmt.Errorf("no other responses expected for %s: %w", srv, err)
-
-				return ctx, err
-			}
+		if len(errs) > 0 {
+			return ctx, errors.New(strings.Join(errs, ", "))
 		}
 
 		return ctx, nil
@@ -324,11 +334,6 @@ var (
 
 func statusCode(statusOrCode string) (int, error) {
 	code, err := strconv.ParseInt(statusOrCode, 10, 64)
-
-	if len(statusMap) == 0 {
-		initStatusMap()
-	}
-
 	if err != nil {
 		code = int64(statusMap[statusOrCode])
 	}
@@ -478,13 +483,25 @@ func (l *LocalClient) service(ctx context.Context, service string) (*httpmock.Cl
 		return nil, fmt.Errorf("undefined service: %s", service)
 	}
 
-	currentLock := ctx.Value(ctxScenarioLockKey{}).(chan struct{})
+	currentLock, ok := ctx.Value(ctxScenarioLockKey{}).(chan struct{})
+	if !ok {
+		return nil, errMissingScenarioLock
+	}
 
 	l.mu.Lock()
 	lock := l.locks[service]
+
 	if lock == nil {
 		l.locks[service] = currentLock
+
+		// Reset client after acquiring lock.
+		c.Reset()
+
+		if c.JSONComparer.Vars != nil {
+			c.JSONComparer.Vars.Reset()
+		}
 	}
+
 	l.mu.Unlock()
 
 	// Wait for the alien lock to be released.
@@ -499,7 +516,8 @@ func (l *LocalClient) service(ctx context.Context, service string) (*httpmock.Cl
 
 var statusMap = map[string]int{}
 
-func initStatusMap() {
+// nolint:gochecknoinits // This is better than extra runtime complexity to sync the statuses.
+func init() {
 	for i := 100; i < 599; i++ {
 		status := http.StatusText(i)
 		if status != "" {
