@@ -4,18 +4,19 @@ import (
 	"bytes"
 	"io/ioutil"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/cucumber/godog"
-	httpsteps "github.com/godogx/httpsteps"
+	"github.com/godogx/httpsteps"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/swaggest/assertjson"
 )
 
 func TestRegisterExternal(t *testing.T) {
-	es := httpsteps.ExternalServer{}
+	es := httpsteps.NewExternalServer()
 
 	someServiceURL := es.Add("some-service")
 	anotherServiceURL := es.Add("another-service")
@@ -43,15 +44,15 @@ func TestRegisterExternal(t *testing.T) {
 
 	assert.Equal(t, 1, suite.Run())
 
-	assert.Contains(t, out.String(), "Error: after scenario hook failed: check failed for external services:\n"+
-		"undefined response (missing `responds with status <STATUS>` step) in some-service for GET /never-called,\n"+
-		"expectations were not met for another-service: there are remaining expectations that were not met: POST /post-something")
+	assert.Contains(t, out.String(), "Error: after scenario hook failed:")
+	assert.Contains(t, out.String(), "undefined response (missing `responds with status <STATUS>` step) in some-service for GET /never-called")
+	assert.Contains(t, out.String(), "expectations were not met for another-service: there are remaining expectations that were not met: POST /post-something")
 }
 
-func callServices(t *testing.T, someServiceURL, anotherServiceURL string) func() error {
+func callServices(t *testing.T, someServiceURL, anotherServiceURL string) func() {
 	t.Helper()
 
-	return func() error {
+	return func() {
 		// Hitting `"some-service" receives "GET" request "/get-something?foo=bar"`.
 		req, err := http.NewRequest(http.MethodGet, someServiceURL+"/get-something?foo=bar", nil)
 		require.NoError(t, err)
@@ -69,8 +70,13 @@ func callServices(t *testing.T, someServiceURL, anotherServiceURL string) func()
 
 		assertjson.Equal(t, []byte(`{"key":"value"}`), respBody, string(respBody))
 
+		wg := sync.WaitGroup{}
 		for i := 0; i < 10; i++ {
+			wg.Add(1)
+
 			go func() {
+				defer wg.Done()
+
 				// Hitting `"another-service" receives "POST" request "/post-something" with body`.
 				req, err := http.NewRequest(http.MethodPost, anotherServiceURL+"/post-something", bytes.NewReader([]byte(`{"foo":"bar"}`)))
 				require.NoError(t, err)
@@ -85,6 +91,7 @@ func callServices(t *testing.T, someServiceURL, anotherServiceURL string) func()
 				assertjson.Equal(t, []byte(`{"theFooWas":"bar"}`), respBody)
 			}()
 		}
+		wg.Wait()
 
 		// Hitting `"some-service" responds with status "OK"`.
 		req, err = http.NewRequest(http.MethodGet, someServiceURL+"/no-response-body", nil)
@@ -110,7 +117,5 @@ func callServices(t *testing.T, someServiceURL, anotherServiceURL string) func()
 		require.NoError(t, err)
 
 		assertjson.Equal(t, []byte(`"foo"`), respBody)
-
-		return nil
 	}
 }

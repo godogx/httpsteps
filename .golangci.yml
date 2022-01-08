@@ -20,7 +20,6 @@ linters-settings:
 linters:
   enable-all: true
   disable:
-    - goerr113
     - lll
     - maligned
     - gochecknoglobals
@@ -34,6 +33,10 @@ linters:
     - scopelint # deprecated
     - ifshort # too many false positives
     - golint # deprecated
+    - varnamelen
+    - tagliatelle
+    - errname
+    - ireturn
 
 issues:
   exclude-use-default: false
@@ -48,6 +51,6 @@ issues:
       path: "_test.go"
     - linters:
         - errcheck
-        - bodyclose
-      path: "example_test.go"
+      path: "example_"
+
 
