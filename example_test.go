@@ -7,17 +7,18 @@ import (
 	"net/http/httptest"
 
 	"github.com/cucumber/godog"
-	httpsteps "github.com/godogx/httpsteps"
+	"github.com/godogx/httpsteps"
 )
 
 func ExampleNewLocalClient() {
-	external := httpsteps.ExternalServer{}
+	external := httpsteps.NewExternalServer()
 	templateService := external.Add("template-service")
 
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		req, _ := http.NewRequest(http.MethodGet, templateService+"/template/hello", nil)
 		resp, _ := http.DefaultTransport.RoundTrip(req)
 		tpl, _ := ioutil.ReadAll(resp.Body)
+		_ = resp.Body.Close()
 
 		_, _ = w.Write([]byte(fmt.Sprintf(string(tpl), r.URL.Query().Get("name"))))
 	})

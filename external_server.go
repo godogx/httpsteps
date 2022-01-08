@@ -2,7 +2,6 @@ package httpsteps
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -16,12 +15,45 @@ type exp struct {
 	async bool
 }
 
+// NewExternalServer creates an ExternalServer.
+func NewExternalServer() *ExternalServer {
+	es := &ExternalServer{}
+	es.mocks = make(map[string]*mock, 1)
+	es.sync = newSynchronized(func(service string) error {
+		m := es.mocks[service]
+		if m == nil {
+			return fmt.Errorf("%w: %s", errNoMockForService, service)
+		}
+
+		if m.exp != nil {
+			return fmt.Errorf("%w in %s for %s %s",
+				errUndefinedResponse, service, m.exp.Method, m.exp.RequestURI)
+		}
+
+		if err := m.srv.ExpectationsWereMet(); err != nil {
+			return fmt.Errorf("expectations were not met for %s: %w", service, err)
+		}
+
+		return nil
+	})
+	es.Vars = &shared.Vars{}
+
+	return es
+}
+
 // ExternalServer is a collection of step-driven HTTP servers to serve requests of application with mocked data.
+//
+// Please use NewExternalServer() to create an instance.
 type ExternalServer struct {
-	pending map[string]exp
-	mocks   map[string]*httpmock.Server
+	mocks map[string]*mock
+	sync  *synchronized
 
 	Vars *shared.Vars
+}
+
+type mock struct {
+	exp *exp
+	srv *httpmock.Server
 }
 
 // RegisterSteps adds steps to godog scenario context to serve outgoing requests with mocked data.
@@ -90,44 +122,8 @@ type ExternalServer struct {
 //		_testdata/sample.json5
 //		"""
 func (e *ExternalServer) RegisterSteps(s *godog.ScenarioContext) {
-	e.pending = make(map[string]exp, len(e.mocks))
-
+	e.sync.register(s)
 	e.steps(s)
-
-	s.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
-		for _, mock := range e.mocks {
-			mock.ResetExpectations()
-		}
-
-		if e.Vars != nil {
-			e.Vars.Reset()
-		}
-
-		return ctx, nil
-	})
-
-	s.After(func(ctx context.Context, sc *godog.Scenario, err error) (context.Context, error) {
-		var errs []string
-
-		if len(e.pending) > 0 {
-			for service, req := range e.pending {
-				errs = append(errs, fmt.Sprintf("%s in %s for %s %s",
-					errUndefinedResponse, service, req.Method, req.RequestURI))
-			}
-		}
-
-		for service, mock := range e.mocks {
-			if err := mock.ExpectationsWereMet(); err != nil {
-				errs = append(errs, fmt.Sprintf("expectations were not met for %s: %s", service, err))
-			}
-		}
-
-		if len(errs) > 0 {
-			return ctx, errors.New("check failed for external services:\n" + strings.Join(errs, ",\n"))
-		}
-
-		return ctx, nil
-	})
 }
 
 func (e *ExternalServer) steps(s *godog.ScenarioContext) {
@@ -155,8 +151,8 @@ func (e *ExternalServer) steps(s *godog.ScenarioContext) {
 
 	// Finalize request expectation.
 	s.Step(`^"([^"]*)" responds with status "([^"]*)"$`,
-		func(service, statusOrCode string) error {
-			return e.serviceRespondsWithStatusAndPreparedBody(service, statusOrCode, nil)
+		func(ctx context.Context, service, statusOrCode string) (context.Context, error) {
+			return e.serviceRespondsWithStatusAndPreparedBody(ctx, service, statusOrCode, nil)
 		})
 	s.Step(`^"([^"]*)" responds with status "([^"]*)" and body$`,
 		e.serviceRespondsWithStatusAndBody)
@@ -164,161 +160,190 @@ func (e *ExternalServer) steps(s *godog.ScenarioContext) {
 		e.serviceRespondsWithStatusAndBodyFromFile)
 }
 
-// GetMock exposes mock of external service.
+// GetMock exposes mock of external service for configuration.
 func (e *ExternalServer) GetMock(service string) *httpmock.Server {
-	return e.mocks[service]
+	return e.mocks[service].srv
+}
+
+func (e *ExternalServer) pending(ctx context.Context, service string) (context.Context, *mock, error) {
+	ctx, m, err := e.mock(ctx, service)
+	if err != nil {
+		return ctx, nil, err
+	}
+
+	if m.exp == nil {
+		return ctx, nil, fmt.Errorf("%w: %q", errUndefinedRequest, service)
+	}
+
+	return ctx, m, nil
+}
+
+// mock returns mock for a service or fails if service is not defined.
+func (e *ExternalServer) mock(ctx context.Context, service string) (context.Context, *mock, error) {
+	service = strings.Trim(service, `" `)
+
+	if service == "" {
+		service = defaultService
+	}
+
+	c, found := e.mocks[service]
+	if !found {
+		return ctx, nil, fmt.Errorf("%w: %s", errUnknownService, service)
+	}
+
+	acquired, err := e.sync.acquireLock(ctx, service)
+	if err != nil {
+		return ctx, nil, err
+	}
+
+	// Reset client after acquiring lock.
+	if acquired {
+		c.exp = nil
+		c.srv.ResetExpectations()
+
+		if e.Vars != nil {
+			ctx, c.srv.JSONComparer.Vars = e.Vars.Fork(ctx)
+		}
+	}
+
+	return ctx, c, nil
 }
 
 // Add starts a mocked server for a named service and returns url.
 func (e *ExternalServer) Add(service string, options ...func(mock *httpmock.Server)) string {
-	mock, url := httpmock.NewServer()
-
-	mock.JSONComparer.Vars = e.Vars
+	m, url := httpmock.NewServer()
 
 	for _, option := range options {
-		option(mock)
+		option(m)
 	}
 
-	if e.mocks == nil {
-		e.mocks = make(map[string]*httpmock.Server, 1)
-	}
-
-	e.mocks[service] = mock
+	e.mocks[service] = &mock{srv: m}
 
 	return url
 }
 
-func (e *ExternalServer) serviceReceivesRequestWithPreparedBody(service, method, requestURI string, body []byte) error {
-	err := e.serviceReceivesRequest(service, method, requestURI)
+func (e *ExternalServer) serviceReceivesRequestWithPreparedBody(ctx context.Context, service, method, requestURI string, body []byte) (context.Context, error) {
+	ctx, err := e.serviceReceivesRequest(ctx, service, method, requestURI)
 	if err != nil {
-		return err
+		return ctx, err
 	}
 
-	pending := e.pending[service]
-
-	pending.RequestBody = body
-	e.pending[service] = pending
-
-	return nil
-}
-
-func (e *ExternalServer) serviceRequestIncludesHeader(service, header, value string) error {
-	pending := e.pending[service]
-
-	if pending.Method == "" {
-		return fmt.Errorf("%w: %q", errUndefinedRequest, service)
-	}
-
-	if pending.RequestHeader == nil {
-		pending.RequestHeader = make(map[string]string, 1)
-	}
-
-	pending.RequestHeader[header] = value
-	e.pending[service] = pending
-
-	return nil
-}
-
-func (e *ExternalServer) serviceReceivesRequestWithBody(service, method, requestURI string, bodyDoc *godog.DocString) error {
-	body, err := loadBody([]byte(bodyDoc.Content), e.Vars)
+	ctx, m, err := e.pending(ctx, service)
 	if err != nil {
-		return err
+		return ctx, err
 	}
 
-	return e.serviceReceivesRequestWithPreparedBody(service, method, requestURI, body)
+	m.exp.RequestBody = body
+
+	return ctx, nil
 }
 
-func (e *ExternalServer) serviceReceivesRequestWithBodyFromFile(service, method, requestURI string, filePath *godog.DocString) error {
-	body, err := loadBodyFromFile(filePath.Content, e.Vars)
+func (e *ExternalServer) serviceRequestIncludesHeader(ctx context.Context, service, header, value string) (context.Context, error) {
+	ctx, m, err := e.pending(ctx, service)
 	if err != nil {
-		return err
+		return ctx, err
 	}
 
-	return e.serviceReceivesRequestWithPreparedBody(service, method, requestURI, body)
+	if m.exp.RequestHeader == nil {
+		m.exp.RequestHeader = make(map[string]string, 1)
+	}
+
+	m.exp.RequestHeader[header] = value
+
+	return ctx, nil
 }
 
-func (e *ExternalServer) serviceReceivesRequest(service, method, requestURI string) error {
-	if _, ok := e.mocks[service]; !ok {
-		return fmt.Errorf("%w: %q", errNoMockForService, service)
+func (e *ExternalServer) serviceReceivesRequestWithBody(ctx context.Context, service, method, requestURI string, bodyDoc string) (context.Context, error) {
+	ctx, m, err := e.mock(ctx, service)
+	if err != nil {
+		return ctx, err
 	}
 
-	pending := e.pending[service]
-	pending.Method = method
-	pending.RequestURI = requestURI
-	e.pending[service] = pending
+	body, err := loadBody([]byte(bodyDoc), m.srv.JSONComparer.Vars)
+	if err != nil {
+		return ctx, err
+	}
 
-	return nil
+	return e.serviceReceivesRequestWithPreparedBody(ctx, service, method, requestURI, body)
 }
 
-func (e *ExternalServer) serviceReceivesRequestNTimes(service string, n int) error {
-	if _, ok := e.mocks[service]; !ok {
-		return fmt.Errorf("%w: %q", errNoMockForService, service)
+func (e *ExternalServer) serviceReceivesRequestWithBodyFromFile(ctx context.Context, service, method, requestURI string, filePath string) (context.Context, error) {
+	ctx, m, err := e.mock(ctx, service)
+	if err != nil {
+		return ctx, err
 	}
 
-	pending := e.pending[service]
-
-	if pending.Method == "" {
-		return fmt.Errorf("%w: %q", errUndefinedRequest, service)
+	body, err := loadBodyFromFile(filePath, m.srv.JSONComparer.Vars)
+	if err != nil {
+		return ctx, err
 	}
 
-	pending.Repeated = n
-	e.pending[service] = pending
-
-	return nil
+	return e.serviceReceivesRequestWithPreparedBody(ctx, service, method, requestURI, body)
 }
 
-func (e *ExternalServer) serviceRequestIsAsync(service string) error {
-	if _, ok := e.mocks[service]; !ok {
-		return fmt.Errorf("%w: %q", errNoMockForService, service)
+func (e *ExternalServer) serviceReceivesRequest(ctx context.Context, service, method, requestURI string) (context.Context, error) {
+	ctx, m, err := e.mock(ctx, service)
+	if err != nil {
+		return ctx, err
 	}
 
-	pending := e.pending[service]
-
-	if pending.Method == "" {
-		return fmt.Errorf("%w: %q", errUndefinedRequest, service)
+	if m.exp != nil {
+		return ctx, fmt.Errorf("%w for %q: %+v", errUnexpectedExpectations, service, *m.exp)
 	}
 
-	pending.async = true
-	e.pending[service] = pending
+	m.exp = &exp{}
+	m.exp.Method = method
+	m.exp.RequestURI = requestURI
 
-	return nil
+	return ctx, nil
 }
 
-func (e *ExternalServer) serviceReceivesRequestMultipleTimes(service string) error {
-	if _, ok := e.mocks[service]; !ok {
-		return fmt.Errorf("%w: %q", errNoMockForService, service)
+func (e *ExternalServer) serviceReceivesRequestNTimes(ctx context.Context, service string, n int) (context.Context, error) {
+	ctx, m, err := e.pending(ctx, service)
+	if err != nil {
+		return ctx, err
 	}
 
-	pending := e.pending[service]
+	m.exp.Repeated = n
 
-	if pending.Method == "" {
-		return fmt.Errorf("%w: %q", errUndefinedRequest, service)
-	}
-
-	pending.Unlimited = true
-	e.pending[service] = pending
-
-	return nil
+	return ctx, nil
 }
 
-func (e *ExternalServer) serviceRespondsWithStatusAndPreparedBody(service, statusOrCode string, body []byte) error {
-	m, ok := e.mocks[service]
-	if !ok {
-		return fmt.Errorf("%w: %q", errNoMockForService, service)
+func (e *ExternalServer) serviceRequestIsAsync(ctx context.Context, service string) (context.Context, error) {
+	ctx, m, err := e.pending(ctx, service)
+	if err != nil {
+		return ctx, err
 	}
 
+	m.exp.async = true
+
+	return ctx, nil
+}
+
+func (e *ExternalServer) serviceReceivesRequestMultipleTimes(ctx context.Context, service string) (context.Context, error) {
+	ctx, m, err := e.pending(ctx, service)
+	if err != nil {
+		return ctx, err
+	}
+
+	m.exp.Unlimited = true
+
+	return ctx, nil
+}
+
+func (e *ExternalServer) serviceRespondsWithStatusAndPreparedBody(ctx context.Context, service, statusOrCode string, body []byte) (context.Context, error) {
 	code, err := statusCode(statusOrCode)
 	if err != nil {
-		return err
+		return ctx, err
 	}
 
-	pending := e.pending[service]
-
-	if pending.Method == "" {
-		return fmt.Errorf("%w: %q", errUndefinedRequest, service)
+	ctx, m, err := e.pending(ctx, service)
+	if err != nil {
+		return ctx, err
 	}
 
-	delete(e.pending, service)
+	pending := *m.exp
+	m.exp = nil
 
 	pending.Status = code
 	pending.ResponseBody = body
@@ -328,50 +353,53 @@ func (e *ExternalServer) serviceRespondsWithStatusAndPreparedBody(service, statu
 	}
 
 	if pending.async {
-		m.ExpectAsync(pending.Expectation)
+		m.srv.ExpectAsync(pending.Expectation)
 	} else {
-		m.Expect(pending.Expectation)
+		m.srv.Expect(pending.Expectation)
 	}
 
-	return nil
+	return ctx, nil
 }
 
-func (e *ExternalServer) serviceResponseIncludesHeader(service, header, value string) error {
-	_, ok := e.mocks[service]
-	if !ok {
-		return fmt.Errorf("%w: %q", errNoMockForService, service)
-	}
-
-	pending := e.pending[service]
-
-	if pending.Method == "" {
-		return fmt.Errorf("%w: %q", errUndefinedRequest, service)
-	}
-
-	if pending.ResponseHeader == nil {
-		pending.ResponseHeader = make(map[string]string, 1)
-	}
-
-	pending.ResponseHeader[header] = value
-	e.pending[service] = pending
-
-	return nil
-}
-
-func (e *ExternalServer) serviceRespondsWithStatusAndBody(service, statusOrCode string, bodyDoc *godog.DocString) error {
-	body, err := loadBody([]byte(bodyDoc.Content), e.Vars)
+func (e *ExternalServer) serviceResponseIncludesHeader(ctx context.Context, service, header, value string) (context.Context, error) {
+	ctx, m, err := e.pending(ctx, service)
 	if err != nil {
-		return err
+		return ctx, err
 	}
 
-	return e.serviceRespondsWithStatusAndPreparedBody(service, statusOrCode, body)
+	if m.exp.ResponseHeader == nil {
+		m.exp.ResponseHeader = make(map[string]string, 1)
+	}
+
+	m.exp.ResponseHeader[header] = value
+
+	return ctx, nil
 }
 
-func (e *ExternalServer) serviceRespondsWithStatusAndBodyFromFile(service, statusOrCode string, filePath *godog.DocString) error {
-	body, err := loadBodyFromFile(filePath.Content, e.Vars)
+func (e *ExternalServer) serviceRespondsWithStatusAndBody(ctx context.Context, service, statusOrCode string, bodyDoc string) (context.Context, error) {
+	ctx, m, err := e.mock(ctx, service)
 	if err != nil {
-		return err
+		return ctx, err
 	}
 
-	return e.serviceRespondsWithStatusAndPreparedBody(service, statusOrCode, body)
+	body, err := loadBody([]byte(bodyDoc), m.srv.JSONComparer.Vars)
+	if err != nil {
+		return ctx, err
+	}
+
+	return e.serviceRespondsWithStatusAndPreparedBody(ctx, service, statusOrCode, body)
+}
+
+func (e *ExternalServer) serviceRespondsWithStatusAndBodyFromFile(ctx context.Context, service, statusOrCode string, filePath string) (context.Context, error) {
+	ctx, m, err := e.mock(ctx, service)
+	if err != nil {
+		return ctx, err
+	}
+
+	body, err := loadBodyFromFile(filePath, m.srv.JSONComparer.Vars)
+	if err != nil {
+		return ctx, err
+	}
+
+	return e.serviceRespondsWithStatusAndPreparedBody(ctx, service, statusOrCode, body)
 }

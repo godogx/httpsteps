@@ -4,13 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/bool64/httpmock"
 	"github.com/bool64/shared"
@@ -39,12 +37,21 @@ func NewLocalClient(defaultBaseURL string, options ...func(*httpmock.Client)) *L
 	defaultBaseURL = strings.TrimRight(defaultBaseURL, "/")
 
 	l := LocalClient{
-		services: map[string]*httpmock.Client{
-			defaultService: makeClient(defaultBaseURL, options),
-		},
-		mu:    &sync.Mutex{},
-		locks: make(map[string]chan struct{}),
+		options: options,
+		Vars:    &shared.Vars{},
 	}
+
+	l.AddService(defaultService, defaultBaseURL)
+
+	l.sync = newSynchronized(func(service string) error {
+		if c, ok := l.services[service]; !ok {
+			return fmt.Errorf("%w: %s", errUnknownService, service)
+		} else if err := c.CheckUnexpectedOtherResponses(); err != nil {
+			return fmt.Errorf("no other responses expected for %s: %w", service, err)
+		}
+
+		return nil
+	})
 
 	return &l
 }
@@ -53,17 +60,19 @@ func NewLocalClient(defaultBaseURL string, options ...func(*httpmock.Client)) *L
 type LocalClient struct {
 	services map[string]*httpmock.Client
 	options  []func(*httpmock.Client)
+	sync     *synchronized
 
-	mu    *sync.Mutex
-	locks map[string]chan struct{}
+	Vars *shared.Vars
 }
 
 // AddService registers a URL for named service.
 func (l *LocalClient) AddService(name, baseURL string) {
-	l.services[name] = makeClient(baseURL, l.options)
-}
+	if l.services == nil {
+		l.services = make(map[string]*httpmock.Client)
+	}
 
-type ctxScenarioLockKey struct{}
+	l.services[name] = l.makeClient(baseURL)
+}
 
 // RegisterSteps adds HTTP server steps to godog scenario context.
 //
@@ -166,42 +175,7 @@ type ctxScenarioLockKey struct{}
 //		path/to/file.json
 //		"""
 func (l *LocalClient) RegisterSteps(s *godog.ScenarioContext) {
-	s.Before(func(ctx context.Context, sc *godog.Scenario) (context.Context, error) {
-		lock := make(chan struct{})
-
-		// Adding unique pointer to context to avoid collisions.
-		return context.WithValue(ctx, ctxScenarioLockKey{}, lock), nil
-	})
-
-	s.After(func(ctx context.Context, sc *godog.Scenario, err error) (context.Context, error) {
-		// Releasing locks owned by scenario.
-		currentLock, ok := ctx.Value(ctxScenarioLockKey{}).(chan struct{})
-		if !ok {
-			return ctx, errMissingScenarioLock
-		}
-
-		var errs []string
-
-		l.mu.Lock()
-		for service, c := range l.services {
-			lock := l.locks[service]
-			if lock == currentLock {
-				delete(l.locks, service)
-
-				if err := c.CheckUnexpectedOtherResponses(); err != nil {
-					errs = append(errs, fmt.Sprintf("no other responses expected for %s: %s", service, err.Error()))
-				}
-			}
-		}
-		l.mu.Unlock()
-		close(currentLock)
-
-		if len(errs) > 0 {
-			return ctx, errors.New(strings.Join(errs, ", "))
-		}
-
-		return ctx, nil
-	})
+	l.sync.register(s)
 
 	s.Step(`^I request(.*) HTTP endpoint with method "([^"]*)" and URI (.*)$`, l.iRequestWithMethodAndURI)
 	s.Step(`^I request(.*) HTTP endpoint with body$`, l.iRequestWithBody)
@@ -222,14 +196,14 @@ func (l *LocalClient) RegisterSteps(s *godog.ScenarioContext) {
 	s.Step(`^I should have(.*) other responses with body from file$`, l.iShouldHaveOtherResponsesWithBodyFromFile)
 }
 
-func (l *LocalClient) iRequestWithMethodAndURI(ctx context.Context, service, method, uri string) error {
-	c, err := l.service(ctx, service)
+func (l *LocalClient) iRequestWithMethodAndURI(ctx context.Context, service, method, uri string) (context.Context, error) {
+	c, ctx, err := l.service(ctx, service)
 	if err != nil {
-		return err
+		return ctx, err
 	}
 
 	if err := c.CheckUnexpectedOtherResponses(); err != nil {
-		return fmt.Errorf("unexpected other responses for previous request: %w", err)
+		return ctx, fmt.Errorf("unexpected other responses for previous request: %w", err)
 	}
 
 	uri = strings.Trim(uri, `"`)
@@ -238,7 +212,7 @@ func (l *LocalClient) iRequestWithMethodAndURI(ctx context.Context, service, met
 	c.WithMethod(method)
 	c.WithURI(uri)
 
-	return nil
+	return ctx, nil
 }
 
 func loadBodyFromFile(filePath string, vars *shared.Vars) ([]byte, error) {
@@ -273,25 +247,24 @@ func loadBody(body []byte, vars *shared.Vars) ([]byte, error) {
 	return body, nil
 }
 
-func (l *LocalClient) iRequestWithBodyFromFile(ctx context.Context, service string, filePath string) error {
-	c, err := l.service(ctx, service)
+func (l *LocalClient) iRequestWithBodyFromFile(ctx context.Context, service string, filePath string) (context.Context, error) {
+	c, ctx, err := l.service(ctx, service)
 	if err != nil {
-		return err
+		return ctx, err
 	}
 
 	body, err := loadBodyFromFile(filePath, c.JSONComparer.Vars)
-
 	if err == nil {
 		c.WithBody(body)
 	}
 
-	return err
+	return ctx, err
 }
 
-func (l *LocalClient) iRequestWithBody(ctx context.Context, service string, bodyDoc string) error {
-	c, err := l.service(ctx, service)
+func (l *LocalClient) iRequestWithBody(ctx context.Context, service string, bodyDoc string) (context.Context, error) {
+	c, ctx, err := l.service(ctx, service)
 	if err != nil {
-		return err
+		return ctx, err
 	}
 
 	body, err := loadBody([]byte(bodyDoc), c.JSONComparer.Vars)
@@ -300,36 +273,38 @@ func (l *LocalClient) iRequestWithBody(ctx context.Context, service string, body
 		c.WithBody(body)
 	}
 
-	return err
+	return ctx, err
 }
 
-func (l *LocalClient) iRequestWithHeader(ctx context.Context, service, key, value string) error {
-	c, err := l.service(ctx, service)
+func (l *LocalClient) iRequestWithHeader(ctx context.Context, service, key, value string) (context.Context, error) {
+	c, ctx, err := l.service(ctx, service)
 	if err != nil {
-		return err
+		return ctx, err
 	}
 
 	c.WithHeader(key, value)
 
-	return nil
+	return ctx, nil
 }
 
-func (l *LocalClient) iRequestWithCookie(ctx context.Context, service, name, value string) error {
-	c, err := l.service(ctx, service)
+func (l *LocalClient) iRequestWithCookie(ctx context.Context, service, name, value string) (context.Context, error) {
+	c, ctx, err := l.service(ctx, service)
 	if err != nil {
-		return err
+		return ctx, err
 	}
 
 	c.WithCookie(name, value)
 
-	return nil
+	return ctx, nil
 }
 
-var (
-	errUnknownStatusCode = errors.New("unknown http status")
-	errNoMockForService  = errors.New("no mock for service")
-	errUndefinedRequest  = errors.New("undefined request (missing `receives <METHOD> request` step)")
-	errUndefinedResponse = errors.New("undefined response (missing `responds with status <STATUS>` step)")
+const (
+	errUnknownStatusCode      = sentinelError("unknown http status")
+	errNoMockForService       = sentinelError("no mock for service")
+	errUndefinedRequest       = sentinelError("undefined request (missing `receives <METHOD> request` step)")
+	errUndefinedResponse      = sentinelError("undefined response (missing `responds with status <STATUS>` step)")
+	errUnknownService         = sentinelError("unknown service")
+	errUnexpectedExpectations = sentinelError("unexpected existing expectations")
 )
 
 func statusCode(statusOrCode string) (int, error) {
@@ -345,125 +320,125 @@ func statusCode(statusOrCode string) (int, error) {
 	return int(code), nil
 }
 
-func (l *LocalClient) iShouldHaveOtherResponsesWithStatus(ctx context.Context, service, statusOrCode string) error {
-	c, err := l.service(ctx, service)
+func (l *LocalClient) iShouldHaveOtherResponsesWithStatus(ctx context.Context, service, statusOrCode string) (context.Context, error) {
+	c, ctx, err := l.service(ctx, service)
 	if err != nil {
-		return err
+		return ctx, err
 	}
 
 	code, err := statusCode(statusOrCode)
 	if err != nil {
-		return err
+		return ctx, err
 	}
 
-	return c.ExpectOtherResponsesStatus(code)
+	return ctx, c.ExpectOtherResponsesStatus(code)
 }
 
-func (l *LocalClient) iShouldHaveResponseWithStatus(ctx context.Context, service, statusOrCode string) error {
-	c, err := l.service(ctx, service)
+func (l *LocalClient) iShouldHaveResponseWithStatus(ctx context.Context, service, statusOrCode string) (context.Context, error) {
+	c, ctx, err := l.service(ctx, service)
 	if err != nil {
-		return err
+		return ctx, err
 	}
 
 	code, err := statusCode(statusOrCode)
 	if err != nil {
-		return err
+		return ctx, err
 	}
 
-	return c.ExpectResponseStatus(code)
+	return ctx, c.ExpectResponseStatus(code)
 }
 
-func (l *LocalClient) iShouldHaveOtherResponsesWithHeader(ctx context.Context, service, key, value string) error {
-	c, err := l.service(ctx, service)
+func (l *LocalClient) iShouldHaveOtherResponsesWithHeader(ctx context.Context, service, key, value string) (context.Context, error) {
+	c, ctx, err := l.service(ctx, service)
 	if err != nil {
-		return err
+		return ctx, err
 	}
 
-	return c.ExpectOtherResponsesHeader(key, value)
+	return ctx, c.ExpectOtherResponsesHeader(key, value)
 }
 
-func (l *LocalClient) iShouldHaveResponseWithHeader(ctx context.Context, service, key, value string) error {
-	c, err := l.service(ctx, service)
+func (l *LocalClient) iShouldHaveResponseWithHeader(ctx context.Context, service, key, value string) (context.Context, error) {
+	c, ctx, err := l.service(ctx, service)
 	if err != nil {
-		return err
+		return ctx, err
 	}
 
-	return c.ExpectResponseHeader(key, value)
+	return ctx, c.ExpectResponseHeader(key, value)
 }
 
-func (l *LocalClient) iShouldHaveResponseWithBody(ctx context.Context, service, bodyDoc string) error {
-	c, err := l.service(ctx, service)
+func (l *LocalClient) iShouldHaveResponseWithBody(ctx context.Context, service, bodyDoc string) (context.Context, error) {
+	c, ctx, err := l.service(ctx, service)
 	if err != nil {
-		return err
+		return ctx, err
 	}
 
 	body, err := loadBody([]byte(bodyDoc), c.JSONComparer.Vars)
 	if err != nil {
-		return err
+		return ctx, err
 	}
 
-	return c.ExpectResponseBody(body)
+	return ctx, c.ExpectResponseBody(body)
 }
 
-func (l *LocalClient) iShouldHaveResponseWithBodyFromFile(ctx context.Context, service, filePath string) error {
-	c, err := l.service(ctx, service)
+func (l *LocalClient) iShouldHaveResponseWithBodyFromFile(ctx context.Context, service, filePath string) (context.Context, error) {
+	c, ctx, err := l.service(ctx, service)
 	if err != nil {
-		return err
+		return ctx, err
 	}
 
 	body, err := loadBodyFromFile(filePath, c.JSONComparer.Vars)
 	if err != nil {
-		return err
+		return ctx, err
 	}
 
-	return c.ExpectResponseBody(body)
+	return ctx, c.ExpectResponseBody(body)
 }
 
-func (l *LocalClient) iShouldHaveOtherResponsesWithBody(ctx context.Context, service, bodyDoc string) error {
-	c, err := l.service(ctx, service)
+func (l *LocalClient) iShouldHaveOtherResponsesWithBody(ctx context.Context, service, bodyDoc string) (context.Context, error) {
+	c, ctx, err := l.service(ctx, service)
 	if err != nil {
-		return err
+		return ctx, err
 	}
 
 	body, err := loadBody([]byte(bodyDoc), c.JSONComparer.Vars)
 	if err != nil {
-		return err
+		return ctx, err
 	}
 
-	return c.ExpectOtherResponsesBody(body)
+	return ctx, c.ExpectOtherResponsesBody(body)
 }
 
-func (l *LocalClient) iShouldHaveOtherResponsesWithBodyFromFile(ctx context.Context, service, filePath string) error {
-	c, err := l.service(ctx, service)
+func (l *LocalClient) iShouldHaveOtherResponsesWithBodyFromFile(ctx context.Context, service, filePath string) (context.Context, error) {
+	c, ctx, err := l.service(ctx, service)
 	if err != nil {
-		return err
+		return ctx, err
 	}
 
 	body, err := loadBodyFromFile(filePath, c.JSONComparer.Vars)
 	if err != nil {
-		return err
+		return ctx, err
 	}
 
-	return c.ExpectOtherResponsesBody(body)
+	return ctx, c.ExpectOtherResponsesBody(body)
 }
 
-func (l *LocalClient) iRequestWithConcurrency(ctx context.Context, service string) error {
-	c, err := l.service(ctx, service)
+func (l *LocalClient) iRequestWithConcurrency(ctx context.Context, service string) (context.Context, error) {
+	c, ctx, err := l.service(ctx, service)
 	if err != nil {
-		return err
+		return ctx, err
 	}
 
 	c.Concurrently()
 
-	return nil
+	return ctx, nil
 }
 
-func makeClient(baseURL string, options []func(client *httpmock.Client)) *httpmock.Client {
+func (l *LocalClient) makeClient(baseURL string) *httpmock.Client {
 	c := httpmock.NewClient(baseURL)
 
-	c.JSONComparer.Vars = &shared.Vars{}
+	c.JSONComparer.Vars = l.Vars
 
-	for _, o := range options {
+	for _, o := range l.options {
 		o(c)
 	}
 
@@ -471,7 +446,7 @@ func makeClient(baseURL string, options []func(client *httpmock.Client)) *httpmo
 }
 
 // service returns named service client or fails for undefined service.
-func (l *LocalClient) service(ctx context.Context, service string) (*httpmock.Client, error) {
+func (l *LocalClient) service(ctx context.Context, service string) (*httpmock.Client, context.Context, error) {
 	service = strings.Trim(service, `" `)
 
 	if service == "" {
@@ -480,43 +455,29 @@ func (l *LocalClient) service(ctx context.Context, service string) (*httpmock.Cl
 
 	c, found := l.services[service]
 	if !found {
-		return nil, fmt.Errorf("undefined service: %s", service)
+		return nil, ctx, fmt.Errorf("%w: %s", errUnknownService, service)
 	}
 
-	currentLock, ok := ctx.Value(ctxScenarioLockKey{}).(chan struct{})
-	if !ok {
-		return nil, errMissingScenarioLock
+	acquired, err := l.sync.acquireLock(ctx, service)
+	if err != nil {
+		return nil, ctx, err
 	}
 
-	l.mu.Lock()
-	lock := l.locks[service]
-
-	if lock == nil {
-		l.locks[service] = currentLock
-
-		// Reset client after acquiring lock.
+	// Reset client after acquiring lock.
+	if acquired {
 		c.Reset()
 
-		if c.JSONComparer.Vars != nil {
-			c.JSONComparer.Vars.Reset()
+		if l.Vars != nil {
+			ctx, c.JSONComparer.Vars = l.Vars.Fork(ctx)
 		}
 	}
 
-	l.mu.Unlock()
-
-	// Wait for the alien lock to be released.
-	if lock != nil && lock != currentLock {
-		<-lock
-
-		return l.service(ctx, service)
-	}
-
-	return c, nil
+	return c, ctx, nil
 }
 
 var statusMap = map[string]int{}
 
-// nolint:gochecknoinits // This is better than extra runtime complexity to sync the statuses.
+// nolint:gochecknoinits // Init is better than extra runtime complexity to sync the statuses.
 func init() {
 	for i := 100; i < 599; i++ {
 		status := http.StatusText(i)

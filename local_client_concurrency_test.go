@@ -11,13 +11,13 @@ import (
 	"github.com/cucumber/godog"
 )
 
-func (l *LocalClient) isLocked(ctx context.Context, service string) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+func (s *synchronized) isLocked(ctx context.Context, service string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	lock := l.locks[service]
+	lock := s.locks[service]
 
-	return lock != nil && lock != ctx.Value(ctxScenarioLockKey{}).(chan struct{})
+	return lock != nil && lock != ctx.Value(s.ctxKey).(chan struct{})
 }
 
 func TestLocalClient_RegisterSteps_concurrency(t *testing.T) {
@@ -54,7 +54,7 @@ func TestLocalClient_RegisterSteps_concurrency(t *testing.T) {
 		ScenarioInitializer: func(s *godog.ScenarioContext) {
 			local.RegisterSteps(s)
 			s.Step(`^I should not be blocked for "([^"]*)"$`, func(ctx context.Context, service string) error {
-				if local.isLocked(ctx, service) {
+				if local.sync.isLocked(ctx, service) {
 					return fmt.Errorf("%s is locked", service)
 				}
 
@@ -86,7 +86,7 @@ func TestLocalClient_RegisterSteps_concurrencyBlocked(t *testing.T) {
 
 	mock.ExpectAsync(httpmock.Expectation{
 		Method:       http.MethodGet,
-		Repeated:     concurrency,
+		Repeated:     2 * concurrency,
 		RequestURI:   "/get-something?service=one",
 		ResponseBody: []byte(`[{"service":"one"}]`),
 		ResponseHeader: map[string]string{
@@ -96,7 +96,7 @@ func TestLocalClient_RegisterSteps_concurrencyBlocked(t *testing.T) {
 
 	mock.ExpectAsync(httpmock.Expectation{
 		Method:       http.MethodGet,
-		Repeated:     concurrency,
+		Repeated:     2 * concurrency,
 		RequestURI:   "/get-something?service=two",
 		ResponseBody: []byte(`[{"service":"two"}]`),
 		ResponseHeader: map[string]string{
