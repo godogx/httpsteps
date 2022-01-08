@@ -23,11 +23,6 @@ func (e sentinelError) Error() string {
 	return string(e)
 }
 
-const (
-	defaultService         = "default"
-	errMissingScenarioLock = sentinelError("missing scenario lock key in context")
-)
-
 // NewLocalClient creates an instance of step-driven HTTP service.
 func NewLocalClient(defaultBaseURL string, options ...func(*httpmock.Client)) *LocalClient {
 	if !strings.HasPrefix(defaultBaseURL, "http://") && !strings.HasPrefix(defaultBaseURL, "https://") {
@@ -299,12 +294,15 @@ func (l *LocalClient) iRequestWithCookie(ctx context.Context, service, name, val
 }
 
 const (
+	defaultService = "default"
+
 	errUnknownStatusCode      = sentinelError("unknown http status")
 	errNoMockForService       = sentinelError("no mock for service")
 	errUndefinedRequest       = sentinelError("undefined request (missing `receives <METHOD> request` step)")
 	errUndefinedResponse      = sentinelError("undefined response (missing `responds with status <STATUS>` step)")
 	errUnknownService         = sentinelError("unknown service")
 	errUnexpectedExpectations = sentinelError("unexpected existing expectations")
+	errMissingScenarioLock    = sentinelError("missing scenario lock key in context")
 )
 
 func statusCode(statusOrCode string) (int, error) {
