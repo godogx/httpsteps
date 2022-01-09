@@ -26,7 +26,9 @@ func (e sentinelError) Error() string {
 
 // NewLocalClient creates an instance of step-driven HTTP service.
 func NewLocalClient(defaultBaseURL string, options ...func(*httpmock.Client)) *LocalClient {
-	if !strings.HasPrefix(defaultBaseURL, "http://") && !strings.HasPrefix(defaultBaseURL, "https://") {
+	if defaultBaseURL != "" &&
+		!strings.HasPrefix(defaultBaseURL, "http://") &&
+		!strings.HasPrefix(defaultBaseURL, "https://") {
 		defaultBaseURL = "http://" + defaultBaseURL
 	}
 
@@ -37,7 +39,7 @@ func NewLocalClient(defaultBaseURL string, options ...func(*httpmock.Client)) *L
 		Vars:    &shared.Vars{},
 	}
 
-	l.AddService(defaultService, defaultBaseURL)
+	l.AddService(Default, defaultBaseURL)
 
 	l.lock = resource.NewLock(func(service string) error {
 		if c, ok := l.services[service]; !ok {
@@ -295,7 +297,8 @@ func (l *LocalClient) iRequestWithCookie(ctx context.Context, service, name, val
 }
 
 const (
-	defaultService = "default"
+	// Default is the name of default service.
+	Default = "default"
 
 	errUnknownStatusCode      = sentinelError("unknown http status")
 	errNoMockForService       = sentinelError("no mock for service")
@@ -434,8 +437,6 @@ func (l *LocalClient) iRequestWithConcurrency(ctx context.Context, service strin
 func (l *LocalClient) makeClient(baseURL string) *httpmock.Client {
 	c := httpmock.NewClient(baseURL)
 
-	c.JSONComparer.Vars = l.Vars
-
 	for _, o := range l.options {
 		o(c)
 	}
@@ -443,12 +444,28 @@ func (l *LocalClient) makeClient(baseURL string) *httpmock.Client {
 	return c
 }
 
+// SetBaseURL sets the base URL for the client.
+func (l *LocalClient) SetBaseURL(baseURL string, service string) error {
+	if service == "" {
+		service = Default
+	}
+
+	s, ok := l.services[service]
+	if !ok {
+		return fmt.Errorf("%w: %s", errUnknownService, service)
+	}
+
+	s.SetBaseURL(baseURL)
+
+	return nil
+}
+
 // service returns named service client or fails for undefined service.
 func (l *LocalClient) service(ctx context.Context, service string) (*httpmock.Client, context.Context, error) {
 	service = strings.Trim(service, `" `)
 
 	if service == "" {
-		service = defaultService
+		service = Default
 	}
 
 	c, found := l.services[service]

@@ -184,7 +184,7 @@ func (e *ExternalServer) mock(ctx context.Context, service string) (context.Cont
 	service = strings.Trim(service, `" `)
 
 	if service == "" {
-		service = defaultService
+		service = Default
 	}
 
 	c, found := e.mocks[service]
