@@ -13,6 +13,7 @@ import (
 	"github.com/bool64/httpmock"
 	"github.com/bool64/shared"
 	"github.com/cucumber/godog"
+	"github.com/godogx/resource"
 	"github.com/swaggest/assertjson/json5"
 )
 
@@ -38,7 +39,7 @@ func NewLocalClient(defaultBaseURL string, options ...func(*httpmock.Client)) *L
 
 	l.AddService(defaultService, defaultBaseURL)
 
-	l.sync = newSynchronized(func(service string) error {
+	l.lock = resource.NewLock(func(service string) error {
 		if c, ok := l.services[service]; !ok {
 			return fmt.Errorf("%w: %s", errUnknownService, service)
 		} else if err := c.CheckUnexpectedOtherResponses(); err != nil {
@@ -55,7 +56,7 @@ func NewLocalClient(defaultBaseURL string, options ...func(*httpmock.Client)) *L
 type LocalClient struct {
 	services map[string]*httpmock.Client
 	options  []func(*httpmock.Client)
-	sync     *synchronized
+	lock     *resource.Lock
 
 	Vars *shared.Vars
 }
@@ -170,7 +171,7 @@ func (l *LocalClient) AddService(name, baseURL string) {
 //		path/to/file.json
 //		"""
 func (l *LocalClient) RegisterSteps(s *godog.ScenarioContext) {
-	l.sync.register(s)
+	l.lock.Register(s)
 
 	s.Step(`^I request(.*) HTTP endpoint with method "([^"]*)" and URI (.*)$`, l.iRequestWithMethodAndURI)
 	s.Step(`^I request(.*) HTTP endpoint with body$`, l.iRequestWithBody)
@@ -302,7 +303,6 @@ const (
 	errUndefinedResponse      = sentinelError("undefined response (missing `responds with status <STATUS>` step)")
 	errUnknownService         = sentinelError("unknown service")
 	errUnexpectedExpectations = sentinelError("unexpected existing expectations")
-	errMissingScenarioLock    = sentinelError("missing scenario lock key in context")
 )
 
 func statusCode(statusOrCode string) (int, error) {
@@ -456,7 +456,7 @@ func (l *LocalClient) service(ctx context.Context, service string) (*httpmock.Cl
 		return nil, ctx, fmt.Errorf("%w: %s", errUnknownService, service)
 	}
 
-	acquired, err := l.sync.acquireLock(ctx, service)
+	acquired, err := l.lock.Acquire(ctx, service)
 	if err != nil {
 		return nil, ctx, err
 	}
@@ -475,7 +475,7 @@ func (l *LocalClient) service(ctx context.Context, service string) (*httpmock.Cl
 
 var statusMap = map[string]int{}
 
-// nolint:gochecknoinits // Init is better than extra runtime complexity to sync the statuses.
+// nolint:gochecknoinits // Init is better than extra runtime complexity to lock the statuses.
 func init() {
 	for i := 100; i < 599; i++ {
 		status := http.StatusText(i)

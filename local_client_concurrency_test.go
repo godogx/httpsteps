@@ -11,15 +11,6 @@ import (
 	"github.com/cucumber/godog"
 )
 
-func (s *synchronized) isLocked(ctx context.Context, service string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	lock := s.locks[service]
-
-	return lock != nil && lock != ctx.Value(s.ctxKey).(chan struct{})
-}
-
 func TestLocalClient_RegisterSteps_concurrency(t *testing.T) {
 	mock, srvURL := httpmock.NewServer()
 	concurrency := 50
@@ -54,7 +45,7 @@ func TestLocalClient_RegisterSteps_concurrency(t *testing.T) {
 		ScenarioInitializer: func(s *godog.ScenarioContext) {
 			local.RegisterSteps(s)
 			s.Step(`^I should not be blocked for "([^"]*)"$`, func(ctx context.Context, service string) error {
-				if local.sync.isLocked(ctx, service) {
+				if local.lock.IsLocked(ctx, service) {
 					return fmt.Errorf("%s is locked", service)
 				}
 

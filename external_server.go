@@ -8,6 +8,7 @@ import (
 	"github.com/bool64/httpmock"
 	"github.com/bool64/shared"
 	"github.com/cucumber/godog"
+	"github.com/godogx/resource"
 )
 
 type exp struct {
@@ -19,7 +20,7 @@ type exp struct {
 func NewExternalServer() *ExternalServer {
 	es := &ExternalServer{}
 	es.mocks = make(map[string]*mock, 1)
-	es.sync = newSynchronized(func(service string) error {
+	es.lock = resource.NewLock(func(service string) error {
 		m := es.mocks[service]
 		if m == nil {
 			return fmt.Errorf("%w: %s", errNoMockForService, service)
@@ -46,7 +47,7 @@ func NewExternalServer() *ExternalServer {
 // Please use NewExternalServer() to create an instance.
 type ExternalServer struct {
 	mocks map[string]*mock
-	sync  *synchronized
+	lock  *resource.Lock
 
 	Vars *shared.Vars
 }
@@ -122,7 +123,7 @@ type mock struct {
 //		_testdata/sample.json5
 //		"""
 func (e *ExternalServer) RegisterSteps(s *godog.ScenarioContext) {
-	e.sync.register(s)
+	e.lock.Register(s)
 	e.steps(s)
 }
 
@@ -191,7 +192,7 @@ func (e *ExternalServer) mock(ctx context.Context, service string) (context.Cont
 		return ctx, nil, fmt.Errorf("%w: %s", errUnknownService, service)
 	}
 
-	acquired, err := e.sync.acquireLock(ctx, service)
+	acquired, err := e.lock.Acquire(ctx, service)
 	if err != nil {
 		return ctx, nil, err
 	}

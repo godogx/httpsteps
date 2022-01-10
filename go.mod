@@ -7,6 +7,7 @@ require (
 	github.com/bool64/httpmock v0.1.1
 	github.com/bool64/shared v0.1.4
 	github.com/cucumber/godog v0.12.3
+	github.com/godogx/resource v0.1.0
 	github.com/stretchr/testify v1.7.0
 	github.com/swaggest/assertjson v1.6.8
 )
