@@ -5,8 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
+	"mime/multipart"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -181,6 +185,9 @@ func (l *LocalClient) RegisterSteps(s *godog.ScenarioContext) {
 
 	s.Step(`^I concurrently request idempotent(.*) HTTP endpoint$`, l.iRequestWithConcurrency)
 
+	s.Step(`^I request(.*) HTTP endpoint with attachment as field "([^"]*)" and file name "([^"]*)"$`, l.iRequestWithAttachment)
+	s.Step(`^I request(.*) HTTP endpoint with attachment as field "([^"]*)" from file$`, l.iRequestWithAttachmentFromFile)
+
 	s.Step(`^I should have(.*) response with status "([^"]*)"$`, l.iShouldHaveResponseWithStatus)
 	s.Step(`^I should have(.*) response with header "([^"]*): ([^"]*)"$`, l.iShouldHaveResponseWithHeader)
 	s.Step(`^I should have(.*) response with body from file$`, l.iShouldHaveResponseWithBodyFromFile)
@@ -292,6 +299,69 @@ func (l *LocalClient) iRequestWithCookie(ctx context.Context, service, name, val
 	c.WithCookie(name, value)
 
 	return ctx, nil
+}
+
+func (l *LocalClient) iRequestWithAttachment(ctx context.Context, service, fieldName, fileName string, fileContent string) (context.Context, error) {
+	c, ctx, err := l.service(ctx, service)
+	if err != nil {
+		return ctx, err
+	}
+
+	body, contentType, err := appendAttachmentFileIntoBody(strings.NewReader(fileContent), fieldName, fileName, c.JSONComparer.Vars)
+	if err == nil {
+		c.WithBody(body)
+		c.WithContentType(contentType)
+	}
+
+	return ctx, err
+}
+
+func (l *LocalClient) iRequestWithAttachmentFromFile(ctx context.Context, service, fieldName string, filePath string) (context.Context, error) {
+	c, ctx, err := l.service(ctx, service)
+	if err != nil {
+		return ctx, err
+	}
+
+	file, err := os.Open(filePath) // nolint: gosec
+	if err != nil {
+		return ctx, err
+	}
+	defer file.Close() // nolint: gosec, errcheck
+
+	body, contentType, err := appendAttachmentFileIntoBody(file, fieldName, filepath.Base(filePath), c.JSONComparer.Vars)
+	if err == nil {
+		c.WithBody(body)
+		c.WithContentType(contentType)
+	}
+
+	return ctx, err
+}
+
+func appendAttachmentFileIntoBody(file io.Reader, fieldName, fileName string, vars *shared.Vars) ([]byte, string, error) {
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+
+	part, err := writer.CreateFormFile(fieldName, fileName)
+	if err != nil {
+		return nil, "", err
+	}
+
+	_, err = io.Copy(part, file)
+	if err != nil {
+		return nil, "", err
+	}
+
+	err = writer.Close()
+	if err != nil {
+		return nil, "", err
+	}
+
+	resBody, err := loadBody(body.Bytes(), vars)
+	if err != nil {
+		return nil, "", err
+	}
+
+	return resBody, writer.FormDataContentType(), nil
 }
 
 const (

@@ -2,6 +2,7 @@ package httpsteps_test
 
 import (
 	"bytes"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
@@ -228,6 +229,58 @@ func TestLocal_RegisterSteps_dynamic(t *testing.T) {
 			Format: "pretty",
 			Strict: true,
 			Paths:  []string{"_testdata/Dynamic.feature"},
+		},
+	}
+
+	if suite.Run() != 0 {
+		t.Fatal("test failed")
+	}
+}
+
+func TestLocal_RegisterSteps_AttachmentFile(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/file-attached" {
+			// Maximum upload of 10 MB files
+			r.ParseMultipartForm(10 << 20) // nolint: errcheck, gosec
+
+			// Get handler for filename, size and headers
+			file, _, err := r.FormFile("file")
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+
+				return
+			}
+
+			defer file.Close() // nolint: errcheck
+
+			const maxBufferSize = 1024 * 512
+			reader := io.LimitReader(file, maxBufferSize)
+
+			content, err := ioutil.ReadAll(reader)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+
+				return
+			}
+
+			_, err = w.Write([]byte(`{"content":"` + string(content) + `"}`))
+			assert.NoError(t, err)
+
+			return
+		}
+	}))
+	defer srv.Close()
+
+	local := httpsteps.NewLocalClient(srv.URL)
+
+	suite := godog.TestSuite{
+		ScenarioInitializer: func(s *godog.ScenarioContext) {
+			local.RegisterSteps(s)
+		},
+		Options: &godog.Options{
+			Format: "pretty",
+			Strict: true,
+			Paths:  []string{"_testdata/AttachmentFile.feature"},
 		},
 	}
 
