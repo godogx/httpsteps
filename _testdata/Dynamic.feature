@@ -2,7 +2,6 @@ Feature: Dynamic data is used in steps
 
   Scenario: Creating user and making an order
     When I request HTTP endpoint with method "POST" and URI "/user"
-
     And I request HTTP endpoint with body
     """json
     {"name": "John Doe"}
@@ -21,8 +20,9 @@ Feature: Dynamic data is used in steps
     """
 
     # Creating an order for that user with $user_id.
-    When I request HTTP endpoint with method "POST" and URI "/order"
-
+    When I request HTTP endpoint with method "POST" and URI "/order/$user_id/?user_id=$user_id"
+    And I request HTTP endpoint with header "X-UserId: $user_id"
+    And I request HTTP endpoint with cookie "user_id: $user_id"
     And I request HTTP endpoint with body
     """json5
     {

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -213,6 +214,10 @@ func (l *LocalClient) iRequestWithMethodAndURI(ctx context.Context, service, met
 
 	uri = strings.Trim(uri, `"`)
 
+	if uri, err = replaceString(uri, c.JSONComparer.Vars); err != nil {
+		return ctx, fmt.Errorf("failed to replace vars in URI: %w", err)
+	}
+
 	c.Reset()
 	c.WithMethod(method)
 	c.WithURI(uri)
@@ -252,6 +257,41 @@ func loadBody(body []byte, vars *shared.Vars) ([]byte, error) {
 	return body, nil
 }
 
+func replaceString(s string, vars *shared.Vars) (string, error) {
+	if vars != nil {
+		type kv struct {
+			k string
+			v string
+		}
+
+		vv := vars.GetAll()
+		kvs := make([]kv, 0, len(vv))
+
+		for k, v := range vv {
+			vs, err := json.Marshal(v)
+			if err != nil {
+				return "", fmt.Errorf("failed to marshal var %s (%v): %w", k, v, err)
+			}
+
+			if vs[0] == '"' {
+				vs = bytes.Trim(vs, `"`)
+			}
+
+			kvs = append(kvs, kv{k: k, v: string(vs)})
+		}
+
+		sort.Slice(kvs, func(i, j int) bool {
+			return len(kvs[i].k) > len(kvs[j].k)
+		})
+
+		for _, kv := range kvs {
+			s = strings.ReplaceAll(s, kv.k, kv.v)
+		}
+	}
+
+	return s, nil
+}
+
 func (l *LocalClient) iRequestWithBodyFromFile(ctx context.Context, service string, filePath string) (context.Context, error) {
 	c, ctx, err := l.service(ctx, service)
 	if err != nil {
@@ -287,6 +327,10 @@ func (l *LocalClient) iRequestWithHeader(ctx context.Context, service, key, valu
 		return ctx, err
 	}
 
+	if value, err = replaceString(value, c.JSONComparer.Vars); err != nil {
+		return ctx, fmt.Errorf("failed to replace vars in header %s: %w", key, err)
+	}
+
 	c.WithHeader(key, value)
 
 	return ctx, nil
@@ -296,6 +340,10 @@ func (l *LocalClient) iRequestWithCookie(ctx context.Context, service, name, val
 	c, ctx, err := l.service(ctx, service)
 	if err != nil {
 		return ctx, err
+	}
+
+	if value, err = replaceString(value, c.JSONComparer.Vars); err != nil {
+		return ctx, fmt.Errorf("failed to replace vars in cookie %s: %w", name, err)
 	}
 
 	c.WithCookie(name, value)
