@@ -204,7 +204,13 @@ func TestLocal_RegisterSteps_dynamic(t *testing.T) {
 			return
 		}
 
-		if r.URL.Path == "/order" {
+		if r.URL.Path == "/order/12345/" && r.URL.Query().Get("user_id") == "12345" {
+			assert.Equal(t, "12345", r.Header.Get("X-UserId"))
+
+			cookie, err := r.Cookie("user_id")
+			assert.NoError(t, err)
+			assert.Equal(t, "12345", cookie.Value)
+
 			b, err := ioutil.ReadAll(r.Body)
 			assert.NoError(t, err)
 			assert.NoError(t, r.Body.Close())
