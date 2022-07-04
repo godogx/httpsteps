@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"mime/multipart"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -177,6 +178,8 @@ func (l *LocalClient) AddService(name, baseURL string) {
 //		"""
 //		path/to/file.json
 //		"""
+//
+// More information at https://github.com/godogx/httpsteps/#local-client.
 func (l *LocalClient) RegisterSteps(s *godog.ScenarioContext) {
 	l.lock.Register(s)
 
@@ -186,6 +189,12 @@ func (l *LocalClient) RegisterSteps(s *godog.ScenarioContext) {
 	s.Step(`^I request(.*) HTTP endpoint with header "([^"]*): ([^"]*)"$`, l.iRequestWithHeader)
 	s.Step(`^I request(.*) HTTP endpoint with cookie "([^"]*): ([^"]*)"$`, l.iRequestWithCookie)
 
+	s.Step(`^I request(.*) HTTP endpoint with cookies$`, l.iRequestWithCookies)
+	s.Step(`^I request(.*) HTTP endpoint with headers$`, l.iRequestWithHeaders)
+	s.Step(`^I request(.*) HTTP endpoint with query parameters$`, l.iRequestWithQueryParameters)
+	s.Step(`^I request(.*) HTTP endpoint with urlencoded form data$`, l.iRequestWithFormDataParameters)
+
+	s.Step(`^I follow redirects from(.*) HTTP endpoint$`, l.iFollowRedirects)
 	s.Step(`^I concurrently request idempotent(.*) HTTP endpoint$`, l.iRequestWithConcurrency)
 
 	s.Step(`^I request(.*) HTTP endpoint with attachment as field "([^"]*)" and file name "([^"]*)"$`, l.iRequestWithAttachment)
@@ -193,11 +202,14 @@ func (l *LocalClient) RegisterSteps(s *godog.ScenarioContext) {
 
 	s.Step(`^I should have(.*) response with status "([^"]*)"$`, l.iShouldHaveResponseWithStatus)
 	s.Step(`^I should have(.*) response with header "([^"]*): ([^"]*)"$`, l.iShouldHaveResponseWithHeader)
+	s.Step(`^I should have(.*) response with headers$`, l.iShouldHaveResponseWithHeaders)
+
 	s.Step(`^I should have(.*) response with body from file$`, l.iShouldHaveResponseWithBodyFromFile)
 	s.Step(`^I should have(.*) response with body$`, l.iShouldHaveResponseWithBody)
 
 	s.Step(`^I should have(.*) other responses with status "([^"]*)"$`, l.iShouldHaveOtherResponsesWithStatus)
 	s.Step(`^I should have(.*) other responses with header "([^"]*): ([^"]*)"$`, l.iShouldHaveOtherResponsesWithHeader)
+	s.Step(`^I should have(.*) other responses with headers$`, l.iShouldHaveOtherResponsesWithHeaders)
 	s.Step(`^I should have(.*) other responses with body$`, l.iShouldHaveOtherResponsesWithBody)
 	s.Step(`^I should have(.*) other responses with body from file$`, l.iShouldHaveOtherResponsesWithBodyFromFile)
 }
@@ -336,6 +348,75 @@ func (l *LocalClient) iRequestWithHeader(ctx context.Context, service, key, valu
 	return ctx, nil
 }
 
+func mapOfData(data *godog.Table) (url.Values, error) {
+	if len(data.Rows[0].Cells) != 2 {
+		return nil, fmt.Errorf("%w, 2 expected, %d received",
+			errInvalidNumberOfColumns, len(data.Rows[0].Cells))
+	}
+
+	res := make(url.Values, len(data.Rows))
+
+	for _, r := range data.Rows {
+		k := r.Cells[0].Value
+		v := r.Cells[1].Value
+		res[k] = append(res[k], v)
+	}
+
+	return res, nil
+}
+
+func (l *LocalClient) tableSetup(
+	ctx context.Context,
+	data *godog.Table,
+	vr *shared.Vars,
+	receiverName string,
+	receiver func(name, value string) *httpmock.Client,
+) (context.Context, error) {
+	m, err := mapOfData(data)
+	if err != nil {
+		return ctx, err
+	}
+
+	for key, values := range m {
+		for _, value := range values {
+			if value, err = replaceString(value, vr); err != nil {
+				return ctx, fmt.Errorf("failed to replace vars in %s %s: %w", receiverName, key, err)
+			}
+
+			receiver(key, value)
+		}
+	}
+
+	return ctx, nil
+}
+
+func (l *LocalClient) iRequestWithFormDataParameters(ctx context.Context, service string, data *godog.Table) (context.Context, error) {
+	c, ctx, err := l.service(ctx, service)
+	if err != nil {
+		return ctx, err
+	}
+
+	return l.tableSetup(ctx, data, c.JSONComparer.Vars, "form data parameter", c.WithURLEncodedFormDataParam)
+}
+
+func (l *LocalClient) iRequestWithQueryParameters(ctx context.Context, service string, data *godog.Table) (context.Context, error) {
+	c, ctx, err := l.service(ctx, service)
+	if err != nil {
+		return ctx, err
+	}
+
+	return l.tableSetup(ctx, data, c.JSONComparer.Vars, "query parameter", c.WithQueryParam)
+}
+
+func (l *LocalClient) iRequestWithHeaders(ctx context.Context, service string, data *godog.Table) (context.Context, error) {
+	c, ctx, err := l.service(ctx, service)
+	if err != nil {
+		return ctx, err
+	}
+
+	return l.tableSetup(ctx, data, c.JSONComparer.Vars, "header", c.WithHeader)
+}
+
 func (l *LocalClient) iRequestWithCookie(ctx context.Context, service, name, value string) (context.Context, error) {
 	c, ctx, err := l.service(ctx, service)
 	if err != nil {
@@ -349,6 +430,15 @@ func (l *LocalClient) iRequestWithCookie(ctx context.Context, service, name, val
 	c.WithCookie(name, value)
 
 	return ctx, nil
+}
+
+func (l *LocalClient) iRequestWithCookies(ctx context.Context, service string, data *godog.Table) (context.Context, error) {
+	c, ctx, err := l.service(ctx, service)
+	if err != nil {
+		return ctx, err
+	}
+
+	return l.tableSetup(ctx, data, c.JSONComparer.Vars, "cookie", c.WithCookie)
 }
 
 func (l *LocalClient) iRequestWithAttachment(ctx context.Context, service, fieldName, fileName string, fileContent string) (context.Context, error) {
@@ -424,6 +514,7 @@ const (
 	errUndefinedResponse      = sentinelError("undefined response (missing `responds with status <STATUS>` step)")
 	errUnknownService         = sentinelError("unknown service")
 	errUnexpectedExpectations = sentinelError("unexpected existing expectations")
+	errInvalidNumberOfColumns = sentinelError("invalid number of columns")
 )
 
 func statusCode(statusOrCode string) (int, error) {
@@ -476,6 +567,28 @@ func (l *LocalClient) iShouldHaveOtherResponsesWithHeader(ctx context.Context, s
 	return ctx, c.ExpectOtherResponsesHeader(key, value)
 }
 
+func (l *LocalClient) iShouldHaveOtherResponsesWithHeaders(ctx context.Context, service string, data *godog.Table) (context.Context, error) {
+	c, ctx, err := l.service(ctx, service)
+	if err != nil {
+		return ctx, err
+	}
+
+	m, err := mapOfData(data)
+	if err != nil {
+		return ctx, err
+	}
+
+	for key, values := range m {
+		for _, value := range values {
+			if err := c.ExpectOtherResponsesHeader(key, value); err != nil {
+				return ctx, fmt.Errorf("failed to assert response header %s: %w", key, err)
+			}
+		}
+	}
+
+	return ctx, nil
+}
+
 func (l *LocalClient) iShouldHaveResponseWithHeader(ctx context.Context, service, key, value string) (context.Context, error) {
 	c, ctx, err := l.service(ctx, service)
 	if err != nil {
@@ -483,6 +596,28 @@ func (l *LocalClient) iShouldHaveResponseWithHeader(ctx context.Context, service
 	}
 
 	return ctx, c.ExpectResponseHeader(key, value)
+}
+
+func (l *LocalClient) iShouldHaveResponseWithHeaders(ctx context.Context, service string, data *godog.Table) (context.Context, error) {
+	c, ctx, err := l.service(ctx, service)
+	if err != nil {
+		return ctx, err
+	}
+
+	m, err := mapOfData(data)
+	if err != nil {
+		return ctx, err
+	}
+
+	for key, values := range m {
+		for _, value := range values {
+			if err := c.ExpectResponseHeader(key, value); err != nil {
+				return ctx, fmt.Errorf("failed to assert response header %s: %w", key, err)
+			}
+		}
+	}
+
+	return ctx, nil
 }
 
 func (l *LocalClient) iShouldHaveResponseWithBody(ctx context.Context, service, bodyDoc string) (context.Context, error) {
@@ -539,6 +674,17 @@ func (l *LocalClient) iShouldHaveOtherResponsesWithBodyFromFile(ctx context.Cont
 	}
 
 	return ctx, c.ExpectOtherResponsesBody(body)
+}
+
+func (l *LocalClient) iFollowRedirects(ctx context.Context, service string) (context.Context, error) {
+	c, ctx, err := l.service(ctx, service)
+	if err != nil {
+		return ctx, err
+	}
+
+	c.FollowRedirects()
+
+	return ctx, nil
 }
 
 func (l *LocalClient) iRequestWithConcurrency(ctx context.Context, service string) (context.Context, error) {
@@ -599,6 +745,7 @@ func (l *LocalClient) service(ctx context.Context, service string) (*httpmock.Cl
 	// Reset client after acquiring lock.
 	if acquired {
 		c.Reset()
+		c.WithContext(ctx)
 
 		if l.Vars != nil {
 			ctx, c.JSONComparer.Vars = l.Vars.Fork(ctx)
