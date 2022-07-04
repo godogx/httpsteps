@@ -2,6 +2,7 @@ package httpsteps_test
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -247,7 +248,7 @@ func TestLocal_RegisterSteps_AttachmentFile(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/file-attached" {
 			// Maximum upload of 10 MB files
-			r.ParseMultipartForm(10 << 20) // nolint: errcheck, gosec
+			assert.NoError(t, r.ParseMultipartForm(10<<20))
 
 			// Get handler for filename, size and headers
 			file, _, err := r.FormFile("file")
@@ -257,7 +258,9 @@ func TestLocal_RegisterSteps_AttachmentFile(t *testing.T) {
 				return
 			}
 
-			defer file.Close() // nolint: errcheck
+			defer func() {
+				assert.NoError(t, file.Close())
+			}()
 
 			const maxBufferSize = 1024 * 512
 			reader := io.LimitReader(file, maxBufferSize)
@@ -292,5 +295,102 @@ func TestLocal_RegisterSteps_AttachmentFile(t *testing.T) {
 
 	if suite.Run() != 0 {
 		t.Fatal("test failed")
+	}
+}
+
+func TestLocal_RegisterSteps_followRedirects(t *testing.T) {
+	mock, srvURL := httpmock.NewServer()
+	mock.OnError = func(err error) {
+		assert.NoError(t, err)
+	}
+
+	defer mock.Close()
+
+	mock.Expect(httpmock.Expectation{
+		RequestURI: "/one",
+		Status:     http.StatusFound,
+		ResponseHeader: map[string]string{
+			"Location": "/two",
+		},
+	})
+	mock.Expect(httpmock.Expectation{
+		RequestURI: "/two",
+		Status:     http.StatusFound,
+		ResponseHeader: map[string]string{
+			"Location": "/three",
+		},
+	})
+	mock.Expect(httpmock.Expectation{
+		RequestURI:   "/three",
+		Status:       http.StatusOK,
+		ResponseBody: []byte("OK"),
+	})
+
+	local := httpsteps.NewLocalClient(srvURL)
+	out := bytes.NewBuffer(nil)
+
+	suite := godog.TestSuite{
+		ScenarioInitializer: func(s *godog.ScenarioContext) {
+			local.RegisterSteps(s)
+		},
+		Options: &godog.Options{
+			Output:   out,
+			Format:   "pretty",
+			NoColors: true,
+			Strict:   true,
+			Paths:    []string{"_testdata/FollowRedirects.feature"},
+		},
+	}
+
+	assert.Equal(t, 0, suite.Run())
+}
+
+func TestLocal_RegisterSteps_tableSetup(t *testing.T) {
+	mock, srvURL := httpmock.NewServer()
+	mock.OnError = func(err error) {
+		assert.NoError(t, err)
+	}
+
+	defer mock.Close()
+
+	mock.Expect(httpmock.Expectation{
+		RequestURI: "/hello?qbar=123&qbar=456&qfoo=foo",
+		RequestHeader: map[string]string{
+			"X-Foo": "foo",
+			"X-Bar": "123",
+		},
+		RequestCookie: map[string]string{
+			"cfoo": "foo",
+			"cbar": "123",
+		},
+		RequestBody:  []byte(`fbar=123&fbar=456&ffoo=abc`),
+		Status:       http.StatusOK,
+		ResponseBody: []byte(`[{"some":"json"}]`),
+		ResponseHeader: map[string]string{
+			"X-Baz":        "abc",
+			"Content-Type": "application/json",
+		},
+	})
+
+	local := httpsteps.NewLocalClient(srvURL)
+	local.AddService("some-service", srvURL)
+
+	out := bytes.NewBuffer(nil)
+
+	suite := godog.TestSuite{
+		ScenarioInitializer: func(s *godog.ScenarioContext) {
+			local.RegisterSteps(s)
+		},
+		Options: &godog.Options{
+			Output:   out,
+			Format:   "pretty",
+			NoColors: true,
+			Strict:   true,
+			Paths:    []string{"_testdata/TableSetup.feature"},
+		},
+	}
+
+	if !assert.Equal(t, 0, suite.Run()) {
+		fmt.Println(out.String())
 	}
 }

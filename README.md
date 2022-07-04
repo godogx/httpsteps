@@ -43,10 +43,33 @@ An additional header can be supplied. For multiple headers, call step multiple t
 And I request HTTP endpoint with header "X-Foo: bar"
 ```
 
+```gherkin
+And I request "some-service" HTTP endpoint with header "X-Foo: bar"
+```
+
+Or use table of values.
+
+```gherkin
+And I request "some-service" HTTP endpoint with headers
+  | X-Foo | foo |
+  | X-Bar | 123 |
+```
+
 An additional cookie can be supplied. For multiple cookies, call step multiple times.
 
 ```gherkin
 And I request HTTP endpoint with cookie "name: value"
+```
+```gherkin
+And I request "some-service" HTTP endpoint with cookie "name: value"
+```
+
+Or use table of values.
+
+```gherkin
+And I request "some-service" HTTP endpoint with cookies
+  | cfoo | foo |
+  | cbar | 123 |
 ```
 
 Optionally request body can be configured. If body is a valid JSON5 payload, it will be converted to JSON before use.
@@ -71,6 +94,26 @@ path/to/file.json5
 """
 ```
 
+Request body can be defined as form data.
+
+```gherkin
+And I request "some-service" HTTP endpoint with urlencoded form data
+  | ffoo | abc |
+  | fbar | 123 |
+  | fbar | 456 |
+```
+
+
+By default, redirects are not followed. This behavior can be changed.
+
+```gherkin
+And I follow redirects from HTTP endpoint
+```
+
+```gherkin
+And I follow redirects from "some-service" HTTP endpoint
+```
+
 If endpoint is capable of handling duplicated requests, you can check it for idempotency. This would send multiple
 requests simultaneously and check
 
@@ -83,6 +126,13 @@ Number of requests can be configured with `Local.ConcurrencyLevel`, default valu
 ```gherkin
 And I concurrently request idempotent HTTP endpoint
 ```
+
+Or for a named service.
+
+```gherkin
+And I concurrently request idempotent "some-service" HTTP endpoint
+```
+
 
 #### Response Expectations
 
@@ -145,6 +195,14 @@ Then I should have response with header "Content-Type: application/json"
 
 And I should have other responses with header "Content-Type: text/plain"
 And I should have other responses with header "X-Header: abc"
+```
+
+Header can be checked using a table.
+
+```gherkin
+And I should have "some-service" response with headers
+  | Content-Type | application/json |
+  | X-Baz        | abc              |
 ```
 
 You can set expectations for named service by adding service name before `response` or `other responses`:
