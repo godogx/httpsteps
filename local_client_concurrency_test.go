@@ -1,4 +1,4 @@
-package httpsteps // nolint:testpackage // This test extends internal implementation for better control, so it has to be internal.
+package httpsteps //nolint:testpackage // This test extends internal implementation for better control, so it has to be internal.
 
 import (
 	"context"

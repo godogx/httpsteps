@@ -61,67 +61,67 @@ type mock struct {
 //
 // In simple case you can define expected URL and response.
 //
-//		Given "some-service" receives "GET" request "/get-something?foo=bar"
+//	Given "some-service" receives "GET" request "/get-something?foo=bar"
 //
-//		And "some-service" responds with status "OK" and body
-//		"""
-//		{"key":"value"}
-//		"""
+//	And "some-service" responds with status "OK" and body
+//	"""
+//	{"key":"value"}
+//	"""
 //
 // Or request with body.
 //
-//		And "another-service" receives "POST" request "/post-something" with body
-//		"""
-//		// Could be a JSON5 too.
-//		{"foo":"bar"}
-//		"""
+//	And "another-service" receives "POST" request "/post-something" with body
+//	"""
+//	// Could be a JSON5 too.
+//	{"foo":"bar"}
+//	"""
 //
 // Request with body from a file.
 //
-//		And "another-service" receives "POST" request "/post-something" with body from file
-//		"""
-//		_testdata/sample.json
-//		"""
+//	And "another-service" receives "POST" request "/post-something" with body from file
+//	"""
+//	_testdata/sample.json
+//	"""
 //
 // Request can expect to have a header.
 //
-//		And "some-service" request includes header "X-Foo: bar"
+//	And "some-service" request includes header "X-Foo: bar"
 //
 // By default, each configured request is expected to be received 1 time. This can be changed to a different number.
 //
-//		And "some-service" request is received 1234 times
+//	And "some-service" request is received 1234 times
 //
 // Or to be unlimited.
 //
-//		And "some-service" request is received several times
+//	And "some-service" request is received several times
 //
 // By default, requests are expected in same sequential order as they are defined.
 // If there is no stable order you can have an async expectation.
 // Async requests are expected in any order.
 //
-//		And "some-service" request is async
+//	And "some-service" request is async
 //
 // Response may have a header.
 //
-//		And "some-service" response includes header "X-Bar: foo"
+//	And "some-service" response includes header "X-Bar: foo"
 //
 // Response must have a status.
 //
-//		And "some-service" responds with status "OK"
+//	And "some-service" responds with status "OK"
 //
 // Response may also have a body.
 //
-//		And "some-service" responds with status "OK" and body
-//		"""
-//		{"key":"value"}
-//		"""
+//	And "some-service" responds with status "OK" and body
+//	"""
+//	{"key":"value"}
+//	"""
 //
 // Response body can also be defined in file.
 //
-//		And "another-service" responds with status "200" and body from file
-//		"""
-//		_testdata/sample.json5
-//		"""
+//	And "another-service" responds with status "200" and body from file
+//	"""
+//	_testdata/sample.json5
+//	"""
 func (e *ExternalServer) RegisterSteps(s *godog.ScenarioContext) {
 	e.lock.Register(s)
 	e.steps(s)

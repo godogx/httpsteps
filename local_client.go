@@ -80,55 +80,54 @@ func (l *LocalClient) AddService(name, baseURL string) {
 
 // RegisterSteps adds HTTP server steps to godog scenario context.
 //
-// Request Setup
+// # Request Setup
 //
 // Request configuration needs at least HTTP method and URI.
 //
-//		When I request HTTP endpoint with method "GET" and URI "/get-something?foo=bar"
+//	When I request HTTP endpoint with method "GET" and URI "/get-something?foo=bar"
 //
 // Configuration can be bound to a specific named service. This service must be registered before.
 // service name should be added before `HTTP endpoint`.
 //
-//	    And I request "some-service" HTTP endpoint with header "X-Foo: bar"
+//	And I request "some-service" HTTP endpoint with header "X-Foo: bar"
 //
 // An additional header can be supplied. For multiple headers, call step multiple times.
 //
-//		And I request HTTP endpoint with header "X-Foo: bar"
+//	And I request HTTP endpoint with header "X-Foo: bar"
 //
 // An additional cookie can be supplied. For multiple cookie, call step multiple times.
 //
-//		And I request HTTP endpoint with cookie "name: value"
+//	And I request HTTP endpoint with cookie "name: value"
 //
 // Optionally request body can be configured. If body is a valid JSON5 payload, it will be converted to JSON before use.
 // Otherwise, body is used as is.
 //
-//		And I request HTTP endpoint with body
-//		"""
-//		[
-//		 // JSON5 comments are allowed.
-//		 {"some":"json"}
-//		]
-//		"""
+//	And I request HTTP endpoint with body
+//	"""
+//	[
+//	 // JSON5 comments are allowed.
+//	 {"some":"json"}
+//	]
+//	"""
 //
 // Request body can be provided from file.
 //
-//		And I request HTTP endpoint with body from file
-//		"""
-//		path/to/file.json5
-//		"""
+//	And I request HTTP endpoint with body from file
+//	"""
+//	path/to/file.json5
+//	"""
 //
 // If endpoint is capable of handling duplicated requests, you can check it for idempotency. This would send multiple
 // requests simultaneously and check
-//   * if all responses are similar or (all successful like GET),
-//   * if responses can be grouped into exactly ONE response of a kind
+//   - if all responses are similar or (all successful like GET),
+//   - if responses can be grouped into exactly ONE response of a kind
 //     and OTHER responses of another kind (one successful, other failed like with POST).
 //
 // Number of requests can be configured with `LocalClient.ConcurrencyLevel`, default value is 10.
 //
-//		And I concurrently request idempotent HTTP endpoint
+//	And I concurrently request idempotent HTTP endpoint
 //
-//
-// Response Expectations
+// # Response Expectations
 //
 // Response expectation has to be configured with at least one step about status, response body or other responses body
 // (idempotency mode).
@@ -138,46 +137,46 @@ func (l *LocalClient) AddService(name, baseURL string) {
 // JSON bodies are compared with https://github.com/swaggest/assertjson which allows ignoring differences
 // when expected value is set to `"<ignore-diff>"`.
 //
-//		And I should have response with body
-//		"""
-//		[
-//		 {"some":"json","time":"<ignore-diff>"}
-//		]
-//		"""
+//	And I should have response with body
+//	"""
+//	[
+//	 {"some":"json","time":"<ignore-diff>"}
+//	]
+//	"""
 //
 // Response body can be provided from file.
 //
-//		And I should have response with body from file
-//		"""
-//		path/to/file.json
-//		"""
+//	And I should have response with body from file
+//	"""
+//	path/to/file.json
+//	"""
 //
 // Status can be defined with either phrase or numeric code. Also, you can set response header expectations.
 //
-//		Then I should have response with status "OK"
-//		And I should have response with header "Content-Type: application/json"
-//		And I should have response with header "X-Header: abc"
+//	Then I should have response with status "OK"
+//	And I should have response with header "Content-Type: application/json"
+//	And I should have response with header "X-Header: abc"
 //
 // In an idempotent mode you can set expectations for statuses of other responses.
 //
-//		Then I should have response with status "204"
+//	Then I should have response with status "204"
 //
-//		And I should have other responses with status "Not Found"
-//		And I should have other responses with header "Content-Type: application/json"
+//	And I should have other responses with status "Not Found"
+//	And I should have other responses with header "Content-Type: application/json"
 //
 // And for bodies of other responses.
 //
-//		And I should have other responses with body
-//		"""
-//		{"status":"failed"}
-//		"""
+//	And I should have other responses with body
+//	"""
+//	{"status":"failed"}
+//	"""
 //
 // Which can be defined as files.
 //
-//		And I should have other responses with body from file
-//		"""
-//		path/to/file.json
-//		"""
+//	And I should have other responses with body from file
+//	"""
+//	path/to/file.json
+//	"""
 //
 // More information at https://github.com/godogx/httpsteps/#local-client.
 func (l *LocalClient) RegisterSteps(s *godog.ScenarioContext) {
@@ -238,7 +237,7 @@ func (l *LocalClient) iRequestWithMethodAndURI(ctx context.Context, service, met
 }
 
 func loadBodyFromFile(filePath string, vars *shared.Vars) ([]byte, error) {
-	body, err := ioutil.ReadFile(filePath) // nolint:gosec // File inclusion via variable during tests.
+	body, err := ioutil.ReadFile(filePath) //nolint // File inclusion via variable during tests.
 	if err != nil {
 		return nil, err
 	}
@@ -462,11 +461,11 @@ func (l *LocalClient) iRequestWithAttachmentFromFile(ctx context.Context, servic
 		return ctx, err
 	}
 
-	file, err := os.Open(filePath) // nolint: gosec
+	file, err := os.Open(filePath) //nolint: gosec
 	if err != nil {
 		return ctx, err
 	}
-	defer file.Close() // nolint: gosec, errcheck
+	defer file.Close() //nolint: gosec, errcheck
 
 	body, contentType, err := appendAttachmentFileIntoBody(file, fieldName, filepath.Base(filePath), c.JSONComparer.Vars)
 	if err == nil {
@@ -757,7 +756,7 @@ func (l *LocalClient) service(ctx context.Context, service string) (*httpmock.Cl
 
 var statusMap = map[string]int{}
 
-// nolint:gochecknoinits // Init is better than extra runtime complexity to lock the statuses.
+//nolint:gochecknoinits // Init is better than extra runtime complexity to lock the statuses.
 func init() {
 	for i := 100; i < 599; i++ {
 		status := http.StatusText(i)
