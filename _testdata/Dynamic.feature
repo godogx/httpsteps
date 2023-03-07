@@ -13,6 +13,7 @@ Feature: Dynamic data is used in steps
     {
       // Capturing dynamic user id as $user_id variable.
      "id":"$user_id",
+     "user": "$user",
      "name": "John Doe",
      // Ignoring other dynamic values.
      "created_at":"<ignore-diff>","updated_at": "<ignore-diff>"
@@ -38,6 +39,7 @@ Feature: Dynamic data is used in steps
     {
      "id":"<ignore-diff>",
      "created_at":"<ignore-diff>","updated_at": "<ignore-diff>",
-     "prefixed_user_id":"static_prefix::$user_id"
+     "prefixed_user_id":"static_prefix::$user_id",
+     "prefixed_user": "static_prefix::$user"
     }
     """

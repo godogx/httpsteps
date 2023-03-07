@@ -273,14 +273,14 @@ func loadBody(body []byte, vars *shared.Vars) ([]byte, error) {
 		}
 
 		sort.Slice(varNames, func(i, j int) bool {
-			return len(varNames[i]) < len(varNames[j])
+			return len(varNames[i]) > len(varNames[j])
 		})
 
 		for _, k := range varNames {
 			jv := varJV[k]
 
 			if jv[0] == '"' && jv[len(jv)-1] == '"' {
-				jv = jv[1 : len(jv)-2]
+				jv = jv[1 : len(jv)-1]
 			}
 
 			body = bytes.ReplaceAll(body, []byte(k), jv)
