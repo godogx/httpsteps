@@ -218,7 +218,7 @@ func TestLocal_RegisterSteps_dynamic(t *testing.T) {
 
 			assert.Equal(t, `{"user_id":12345,"item_name":"Watermelon"}`, string(b))
 
-			_, err = w.Write([]byte(`{"id":54321,"created_at":"any","updated_at": "any","user_id":12345}`))
+			_, err = w.Write([]byte(`{"id":54321,"created_at":"any","updated_at": "any","prefixed_user_id":"static_prefix::12345"}`))
 			assert.NoError(t, err)
 
 			return

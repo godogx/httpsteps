@@ -352,6 +352,7 @@ Here is an example where value from response of one step is used in request of a
      "id":"<ignore-diff>",
      "created_at":"<ignore-diff>","updated_at": "<ignore-diff>",
      "user_id":"$user_id"
+     "prefixed_user_id": "static_prefix::$user_id"
     }
     """
 ```

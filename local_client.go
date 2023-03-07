@@ -255,13 +255,35 @@ func loadBody(body []byte, vars *shared.Vars) ([]byte, error) {
 	}
 
 	if vars != nil {
+		varMap := vars.GetAll()
+		varNames := make([]string, 0, len(varMap))
+		varJV := make(map[string][]byte)
+
 		for k, v := range vars.GetAll() {
+			varNames = append(varNames, k)
+
 			jv, err := json.Marshal(v)
 			if err != nil {
 				return nil, fmt.Errorf("failed to marshal var %s (%v): %w", k, v, err)
 			}
 
+			varJV[k] = jv
+
 			body = bytes.ReplaceAll(body, []byte(`"`+k+`"`), jv)
+		}
+
+		sort.Slice(varNames, func(i, j int) bool {
+			return len(varNames[i]) < len(varNames[j])
+		})
+
+		for _, k := range varNames {
+			jv := varJV[k]
+
+			if jv[0] == '"' && jv[len(jv)-1] == '"' {
+				jv = jv[1 : len(jv)-2]
+			}
+
+			body = bytes.ReplaceAll(body, []byte(k), jv)
 		}
 	}
 
