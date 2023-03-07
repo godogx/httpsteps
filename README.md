@@ -310,6 +310,8 @@ _testdata/sample.json5
 When data is not known in advance, but can be inferred from previous steps, you can use 
 [dynamic variables](https://github.com/bool64/shared).
 
+See also steps to manage variables: [`github.com/godogx/vars`](https://github.com/godogx/vars).
+
 Here is an example where value from response of one step is used in request of another step.
 
 ```gherkin
@@ -352,6 +354,7 @@ Here is an example where value from response of one step is used in request of a
      "id":"<ignore-diff>",
      "created_at":"<ignore-diff>","updated_at": "<ignore-diff>",
      "user_id":"$user_id"
+     "prefixed_user_id": "static_prefix::$user_id"
     }
     """
 ```
