@@ -260,7 +260,7 @@ func (e *ExternalServer) serviceReceivesRequestWithBody(ctx context.Context, ser
 		return ctx, err
 	}
 
-	body, err := loadBody([]byte(bodyDoc), m.srv.JSONComparer.Vars)
+	body, err := LoadBody([]byte(bodyDoc), m.srv.JSONComparer.Vars)
 	if err != nil {
 		return ctx, err
 	}
@@ -274,7 +274,7 @@ func (e *ExternalServer) serviceReceivesRequestWithBodyFromFile(ctx context.Cont
 		return ctx, err
 	}
 
-	body, err := loadBodyFromFile(filePath, m.srv.JSONComparer.Vars)
+	body, err := LoadBodyFromFile(filePath, m.srv.JSONComparer.Vars)
 	if err != nil {
 		return ctx, err
 	}
@@ -383,7 +383,7 @@ func (e *ExternalServer) serviceRespondsWithStatusAndBody(ctx context.Context, s
 		return ctx, err
 	}
 
-	body, err := loadBody([]byte(bodyDoc), m.srv.JSONComparer.Vars)
+	body, err := LoadBody([]byte(bodyDoc), m.srv.JSONComparer.Vars)
 	if err != nil {
 		return ctx, err
 	}
@@ -397,7 +397,7 @@ func (e *ExternalServer) serviceRespondsWithStatusAndBodyFromFile(ctx context.Co
 		return ctx, err
 	}
 
-	body, err := loadBodyFromFile(filePath, m.srv.JSONComparer.Vars)
+	body, err := LoadBodyFromFile(filePath, m.srv.JSONComparer.Vars)
 	if err != nil {
 		return ctx, err
 	}

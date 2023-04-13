@@ -6,6 +6,12 @@ Feature: HTTP Service
     And I should have response with body
     """json
     [
+      {"some":"json","dyn":"abc"}
+    ]
+    """
+    And I should have response with body, that matches JSON
+    """json
+    [
       {"some":"json"}
     ]
     """
@@ -27,7 +33,7 @@ Feature: HTTP Service
     And I request HTTP endpoint with body
     """
     [
-      {"some":"json"}
+      {"some":"json","dyn":"abc"}
     ]
     """
     Then I should have response with body
@@ -47,6 +53,10 @@ Feature: HTTP Service
     Then I should have response with status "204"
     And I should have other responses with status "Not Found"
     And I should have other responses with body
+    """json
+    {"status":"failed","error": "foo"}
+    """
+    And I should have other responses with body, that matches JSON
     """json
     {"status":"failed"}
     """
@@ -85,8 +95,18 @@ Feature: HTTP Service
     And I should have "some-service" response with body
     """json
     [
+      {"some":"json","dyn":"abc"}
+    ]
+    """
+    And I should have "some-service" response with body, that matches JSON
+    """json
+    [
       {"some":"json"}
     ]
+    """
+    And I should have "some-service" response with body, that matches JSON from file
+    """
+    _testdata/match.json
     """
     And I should have "some-service" response with header "Content-Type: application/json"
 

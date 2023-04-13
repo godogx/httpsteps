@@ -56,7 +56,7 @@ func setExpectations(mock *httpmock.Server, concurrencyLevel int) {
 	mock.Expect(httpmock.Expectation{
 		Method:       http.MethodGet,
 		RequestURI:   "/get-something?foo=bar",
-		ResponseBody: []byte(`[{"some":"json"}]`),
+		ResponseBody: []byte(`[{"some":"json", "dyn": "abc"}]`),
 		ResponseHeader: map[string]string{
 			"Content-Type": "application/json",
 		},
@@ -82,7 +82,7 @@ func setExpectations(mock *httpmock.Server, concurrencyLevel int) {
 		RequestHeader: map[string]string{
 			"X-Foo": "bar",
 		},
-		RequestBody:  []byte(`[{"some":"json"}]`),
+		RequestBody:  []byte(`[{"some":"json","dyn":"abc"}]`),
 		ResponseBody: []byte(`{"status":"ok"}`),
 		ResponseHeader: map[string]string{
 			"Content-Type": "application/json",
@@ -105,7 +105,7 @@ func setExpectations(mock *httpmock.Server, concurrencyLevel int) {
 	// Due to idempotence testing several more requests should be expected.
 	delNotFound := del
 	delNotFound.Status = http.StatusNotFound
-	delNotFound.ResponseBody = []byte(`{"status":"failed"}`)
+	delNotFound.ResponseBody = []byte(`{"status":"failed","error":"foo"}`)
 
 	for i := 0; i < concurrencyLevel-1; i++ {
 		mock.Expect(delNotFound)
@@ -137,7 +137,7 @@ func setExpectations(mock *httpmock.Server, concurrencyLevel int) {
 	mock.Expect(httpmock.Expectation{
 		Method:       http.MethodGet,
 		RequestURI:   "/get-something?foo=bar",
-		ResponseBody: []byte(`[{"some":"json"}]`),
+		ResponseBody: []byte(`[{"some":"json","dyn":"abc"}]`),
 		ResponseHeader: map[string]string{
 			"Content-Type": "application/json",
 		},
@@ -167,7 +167,7 @@ func TestLocal_RegisterSteps_unexpectedOtherResp(t *testing.T) {
 	// Due to idempotence testing several more requests should be expected.
 	delNotFound := del
 	delNotFound.Status = http.StatusNotFound
-	delNotFound.ResponseBody = []byte(`{"status":"failed"}`)
+	delNotFound.ResponseBody = []byte(`{"status":"failed","error":"foo"}`)
 
 	for i := 0; i < concurrencyLevel-1; i++ {
 		mock.Expect(delNotFound)
@@ -365,7 +365,7 @@ func TestLocal_RegisterSteps_tableSetup(t *testing.T) {
 		},
 		RequestBody:  []byte(`fbar=123&fbar=456&ffoo=abc`),
 		Status:       http.StatusOK,
-		ResponseBody: []byte(`[{"some":"json"}]`),
+		ResponseBody: []byte(`[{"some":"json","dyn":"abc"}]`),
 		ResponseHeader: map[string]string{
 			"X-Baz":        "abc",
 			"Content-Type": "application/json",

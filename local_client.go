@@ -205,16 +205,20 @@ func (l *LocalClient) RegisterSteps(s *godog.ScenarioContext) {
 
 	s.Step(`^I should have(.*) response with body from file$`, l.iShouldHaveResponseWithBodyFromFile)
 	s.Step(`^I should have(.*) response with body$`, l.iShouldHaveResponseWithBody)
+	s.Step(`^I should have(.*) response with body, that matches JSON from file$`, l.iShouldHaveResponseWithBodyThatMatchesJSONFromFile)
+	s.Step(`^I should have(.*) response with body, that matches JSON$`, l.iShouldHaveResponseWithBodyThatMatchesJSON)
 
 	s.Step(`^I should have(.*) other responses with status "([^"]*)"$`, l.iShouldHaveOtherResponsesWithStatus)
 	s.Step(`^I should have(.*) other responses with header "([^"]*): ([^"]*)"$`, l.iShouldHaveOtherResponsesWithHeader)
 	s.Step(`^I should have(.*) other responses with headers$`, l.iShouldHaveOtherResponsesWithHeaders)
 	s.Step(`^I should have(.*) other responses with body$`, l.iShouldHaveOtherResponsesWithBody)
 	s.Step(`^I should have(.*) other responses with body from file$`, l.iShouldHaveOtherResponsesWithBodyFromFile)
+	s.Step(`^I should have(.*) other responses with body, that matches JSON$`, l.iShouldHaveOtherResponsesWithBodyThatMatchesJSON)
+	s.Step(`^I should have(.*) other responses with body, that matches JSON from file$`, l.iShouldHaveOtherResponsesWithBodyThatMatchesJSONFromFile)
 }
 
 func (l *LocalClient) iRequestWithMethodAndURI(ctx context.Context, service, method, uri string) (context.Context, error) {
-	c, ctx, err := l.service(ctx, service)
+	c, ctx, err := l.Service(ctx, service)
 	if err != nil {
 		return ctx, err
 	}
@@ -236,16 +240,18 @@ func (l *LocalClient) iRequestWithMethodAndURI(ctx context.Context, service, met
 	return ctx, nil
 }
 
-func loadBodyFromFile(filePath string, vars *shared.Vars) ([]byte, error) {
+// LoadBodyFromFile loads body from file and replaces vars in it.
+func LoadBodyFromFile(filePath string, vars *shared.Vars) ([]byte, error) {
 	body, err := ioutil.ReadFile(filePath) //nolint // File inclusion via variable during tests.
 	if err != nil {
 		return nil, err
 	}
 
-	return loadBody(body, vars)
+	return LoadBody(body, vars)
 }
 
-func loadBody(body []byte, vars *shared.Vars) ([]byte, error) {
+// LoadBody loads body from bytes and replaces vars in it.
+func LoadBody(body []byte, vars *shared.Vars) ([]byte, error) {
 	var err error
 
 	if json5.Valid(body) {
@@ -326,12 +332,12 @@ func replaceString(s string, vars *shared.Vars) (string, error) {
 }
 
 func (l *LocalClient) iRequestWithBodyFromFile(ctx context.Context, service string, filePath string) (context.Context, error) {
-	c, ctx, err := l.service(ctx, service)
+	c, ctx, err := l.Service(ctx, service)
 	if err != nil {
 		return ctx, err
 	}
 
-	body, err := loadBodyFromFile(filePath, c.JSONComparer.Vars)
+	body, err := LoadBodyFromFile(filePath, c.JSONComparer.Vars)
 	if err == nil {
 		c.WithBody(body)
 	}
@@ -340,12 +346,12 @@ func (l *LocalClient) iRequestWithBodyFromFile(ctx context.Context, service stri
 }
 
 func (l *LocalClient) iRequestWithBody(ctx context.Context, service string, bodyDoc string) (context.Context, error) {
-	c, ctx, err := l.service(ctx, service)
+	c, ctx, err := l.Service(ctx, service)
 	if err != nil {
 		return ctx, err
 	}
 
-	body, err := loadBody([]byte(bodyDoc), c.JSONComparer.Vars)
+	body, err := LoadBody([]byte(bodyDoc), c.JSONComparer.Vars)
 
 	if err == nil {
 		c.WithBody(body)
@@ -355,7 +361,7 @@ func (l *LocalClient) iRequestWithBody(ctx context.Context, service string, body
 }
 
 func (l *LocalClient) iRequestWithHeader(ctx context.Context, service, key, value string) (context.Context, error) {
-	c, ctx, err := l.service(ctx, service)
+	c, ctx, err := l.Service(ctx, service)
 	if err != nil {
 		return ctx, err
 	}
@@ -412,7 +418,7 @@ func (l *LocalClient) tableSetup(
 }
 
 func (l *LocalClient) iRequestWithFormDataParameters(ctx context.Context, service string, data *godog.Table) (context.Context, error) {
-	c, ctx, err := l.service(ctx, service)
+	c, ctx, err := l.Service(ctx, service)
 	if err != nil {
 		return ctx, err
 	}
@@ -421,7 +427,7 @@ func (l *LocalClient) iRequestWithFormDataParameters(ctx context.Context, servic
 }
 
 func (l *LocalClient) iRequestWithQueryParameters(ctx context.Context, service string, data *godog.Table) (context.Context, error) {
-	c, ctx, err := l.service(ctx, service)
+	c, ctx, err := l.Service(ctx, service)
 	if err != nil {
 		return ctx, err
 	}
@@ -430,7 +436,7 @@ func (l *LocalClient) iRequestWithQueryParameters(ctx context.Context, service s
 }
 
 func (l *LocalClient) iRequestWithHeaders(ctx context.Context, service string, data *godog.Table) (context.Context, error) {
-	c, ctx, err := l.service(ctx, service)
+	c, ctx, err := l.Service(ctx, service)
 	if err != nil {
 		return ctx, err
 	}
@@ -439,7 +445,7 @@ func (l *LocalClient) iRequestWithHeaders(ctx context.Context, service string, d
 }
 
 func (l *LocalClient) iRequestWithCookie(ctx context.Context, service, name, value string) (context.Context, error) {
-	c, ctx, err := l.service(ctx, service)
+	c, ctx, err := l.Service(ctx, service)
 	if err != nil {
 		return ctx, err
 	}
@@ -454,7 +460,7 @@ func (l *LocalClient) iRequestWithCookie(ctx context.Context, service, name, val
 }
 
 func (l *LocalClient) iRequestWithCookies(ctx context.Context, service string, data *godog.Table) (context.Context, error) {
-	c, ctx, err := l.service(ctx, service)
+	c, ctx, err := l.Service(ctx, service)
 	if err != nil {
 		return ctx, err
 	}
@@ -463,7 +469,7 @@ func (l *LocalClient) iRequestWithCookies(ctx context.Context, service string, d
 }
 
 func (l *LocalClient) iRequestWithAttachment(ctx context.Context, service, fieldName, fileName string, fileContent string) (context.Context, error) {
-	c, ctx, err := l.service(ctx, service)
+	c, ctx, err := l.Service(ctx, service)
 	if err != nil {
 		return ctx, err
 	}
@@ -478,7 +484,7 @@ func (l *LocalClient) iRequestWithAttachment(ctx context.Context, service, field
 }
 
 func (l *LocalClient) iRequestWithAttachmentFromFile(ctx context.Context, service, fieldName string, filePath string) (context.Context, error) {
-	c, ctx, err := l.service(ctx, service)
+	c, ctx, err := l.Service(ctx, service)
 	if err != nil {
 		return ctx, err
 	}
@@ -517,7 +523,7 @@ func appendAttachmentFileIntoBody(file io.Reader, fieldName, fileName string, va
 		return nil, "", err
 	}
 
-	resBody, err := loadBody(body.Bytes(), vars)
+	resBody, err := LoadBody(body.Bytes(), vars)
 	if err != nil {
 		return nil, "", err
 	}
@@ -552,7 +558,7 @@ func statusCode(statusOrCode string) (int, error) {
 }
 
 func (l *LocalClient) iShouldHaveOtherResponsesWithStatus(ctx context.Context, service, statusOrCode string) (context.Context, error) {
-	c, ctx, err := l.service(ctx, service)
+	c, ctx, err := l.Service(ctx, service)
 	if err != nil {
 		return ctx, err
 	}
@@ -566,7 +572,7 @@ func (l *LocalClient) iShouldHaveOtherResponsesWithStatus(ctx context.Context, s
 }
 
 func (l *LocalClient) iShouldHaveResponseWithStatus(ctx context.Context, service, statusOrCode string) (context.Context, error) {
-	c, ctx, err := l.service(ctx, service)
+	c, ctx, err := l.Service(ctx, service)
 	if err != nil {
 		return ctx, err
 	}
@@ -580,7 +586,7 @@ func (l *LocalClient) iShouldHaveResponseWithStatus(ctx context.Context, service
 }
 
 func (l *LocalClient) iShouldHaveOtherResponsesWithHeader(ctx context.Context, service, key, value string) (context.Context, error) {
-	c, ctx, err := l.service(ctx, service)
+	c, ctx, err := l.Service(ctx, service)
 	if err != nil {
 		return ctx, err
 	}
@@ -589,7 +595,7 @@ func (l *LocalClient) iShouldHaveOtherResponsesWithHeader(ctx context.Context, s
 }
 
 func (l *LocalClient) iShouldHaveOtherResponsesWithHeaders(ctx context.Context, service string, data *godog.Table) (context.Context, error) {
-	c, ctx, err := l.service(ctx, service)
+	c, ctx, err := l.Service(ctx, service)
 	if err != nil {
 		return ctx, err
 	}
@@ -611,7 +617,7 @@ func (l *LocalClient) iShouldHaveOtherResponsesWithHeaders(ctx context.Context, 
 }
 
 func (l *LocalClient) iShouldHaveResponseWithHeader(ctx context.Context, service, key, value string) (context.Context, error) {
-	c, ctx, err := l.service(ctx, service)
+	c, ctx, err := l.Service(ctx, service)
 	if err != nil {
 		return ctx, err
 	}
@@ -620,7 +626,7 @@ func (l *LocalClient) iShouldHaveResponseWithHeader(ctx context.Context, service
 }
 
 func (l *LocalClient) iShouldHaveResponseWithHeaders(ctx context.Context, service string, data *godog.Table) (context.Context, error) {
-	c, ctx, err := l.service(ctx, service)
+	c, ctx, err := l.Service(ctx, service)
 	if err != nil {
 		return ctx, err
 	}
@@ -642,12 +648,12 @@ func (l *LocalClient) iShouldHaveResponseWithHeaders(ctx context.Context, servic
 }
 
 func (l *LocalClient) iShouldHaveResponseWithBody(ctx context.Context, service, bodyDoc string) (context.Context, error) {
-	c, ctx, err := l.service(ctx, service)
+	c, ctx, err := l.Service(ctx, service)
 	if err != nil {
 		return ctx, err
 	}
 
-	body, err := loadBody([]byte(bodyDoc), c.JSONComparer.Vars)
+	body, err := LoadBody([]byte(bodyDoc), c.JSONComparer.Vars)
 	if err != nil {
 		return ctx, err
 	}
@@ -656,12 +662,12 @@ func (l *LocalClient) iShouldHaveResponseWithBody(ctx context.Context, service, 
 }
 
 func (l *LocalClient) iShouldHaveResponseWithBodyFromFile(ctx context.Context, service, filePath string) (context.Context, error) {
-	c, ctx, err := l.service(ctx, service)
+	c, ctx, err := l.Service(ctx, service)
 	if err != nil {
 		return ctx, err
 	}
 
-	body, err := loadBodyFromFile(filePath, c.JSONComparer.Vars)
+	body, err := LoadBodyFromFile(filePath, c.JSONComparer.Vars)
 	if err != nil {
 		return ctx, err
 	}
@@ -669,13 +675,45 @@ func (l *LocalClient) iShouldHaveResponseWithBodyFromFile(ctx context.Context, s
 	return ctx, c.ExpectResponseBody(body)
 }
 
-func (l *LocalClient) iShouldHaveOtherResponsesWithBody(ctx context.Context, service, bodyDoc string) (context.Context, error) {
-	c, ctx, err := l.service(ctx, service)
+func (l *LocalClient) iShouldHaveResponseWithBodyThatMatchesJSON(ctx context.Context, service, bodyDoc string) (context.Context, error) {
+	c, ctx, err := l.Service(ctx, service)
 	if err != nil {
 		return ctx, err
 	}
 
-	body, err := loadBody([]byte(bodyDoc), c.JSONComparer.Vars)
+	body, err := LoadBody([]byte(bodyDoc), c.JSONComparer.Vars)
+	if err != nil {
+		return ctx, err
+	}
+
+	return ctx, c.ExpectResponseBodyCallback(func(received []byte) error {
+		return c.JSONComparer.FailMismatch(body, received)
+	})
+}
+
+func (l *LocalClient) iShouldHaveResponseWithBodyThatMatchesJSONFromFile(ctx context.Context, service, filePath string) (context.Context, error) {
+	c, ctx, err := l.Service(ctx, service)
+	if err != nil {
+		return ctx, err
+	}
+
+	body, err := LoadBodyFromFile(filePath, c.JSONComparer.Vars)
+	if err != nil {
+		return ctx, err
+	}
+
+	return ctx, c.ExpectResponseBodyCallback(func(received []byte) error {
+		return c.JSONComparer.FailMismatch(body, received)
+	})
+}
+
+func (l *LocalClient) iShouldHaveOtherResponsesWithBody(ctx context.Context, service, bodyDoc string) (context.Context, error) {
+	c, ctx, err := l.Service(ctx, service)
+	if err != nil {
+		return ctx, err
+	}
+
+	body, err := LoadBody([]byte(bodyDoc), c.JSONComparer.Vars)
 	if err != nil {
 		return ctx, err
 	}
@@ -684,12 +722,12 @@ func (l *LocalClient) iShouldHaveOtherResponsesWithBody(ctx context.Context, ser
 }
 
 func (l *LocalClient) iShouldHaveOtherResponsesWithBodyFromFile(ctx context.Context, service, filePath string) (context.Context, error) {
-	c, ctx, err := l.service(ctx, service)
+	c, ctx, err := l.Service(ctx, service)
 	if err != nil {
 		return ctx, err
 	}
 
-	body, err := loadBodyFromFile(filePath, c.JSONComparer.Vars)
+	body, err := LoadBodyFromFile(filePath, c.JSONComparer.Vars)
 	if err != nil {
 		return ctx, err
 	}
@@ -697,8 +735,40 @@ func (l *LocalClient) iShouldHaveOtherResponsesWithBodyFromFile(ctx context.Cont
 	return ctx, c.ExpectOtherResponsesBody(body)
 }
 
+func (l *LocalClient) iShouldHaveOtherResponsesWithBodyThatMatchesJSON(ctx context.Context, service, bodyDoc string) (context.Context, error) {
+	c, ctx, err := l.Service(ctx, service)
+	if err != nil {
+		return ctx, err
+	}
+
+	body, err := LoadBody([]byte(bodyDoc), c.JSONComparer.Vars)
+	if err != nil {
+		return ctx, err
+	}
+
+	return ctx, c.ExpectOtherResponsesBodyCallback(func(received []byte) error {
+		return c.JSONComparer.FailMismatch(body, received)
+	})
+}
+
+func (l *LocalClient) iShouldHaveOtherResponsesWithBodyThatMatchesJSONFromFile(ctx context.Context, service, filePath string) (context.Context, error) {
+	c, ctx, err := l.Service(ctx, service)
+	if err != nil {
+		return ctx, err
+	}
+
+	body, err := LoadBodyFromFile(filePath, c.JSONComparer.Vars)
+	if err != nil {
+		return ctx, err
+	}
+
+	return ctx, c.ExpectOtherResponsesBodyCallback(func(received []byte) error {
+		return c.JSONComparer.FailMismatch(body, received)
+	})
+}
+
 func (l *LocalClient) iFollowRedirects(ctx context.Context, service string) (context.Context, error) {
-	c, ctx, err := l.service(ctx, service)
+	c, ctx, err := l.Service(ctx, service)
 	if err != nil {
 		return ctx, err
 	}
@@ -709,7 +779,7 @@ func (l *LocalClient) iFollowRedirects(ctx context.Context, service string) (con
 }
 
 func (l *LocalClient) iRequestWithConcurrency(ctx context.Context, service string) (context.Context, error) {
-	c, ctx, err := l.service(ctx, service)
+	c, ctx, err := l.Service(ctx, service)
 	if err != nil {
 		return ctx, err
 	}
@@ -745,8 +815,8 @@ func (l *LocalClient) SetBaseURL(baseURL string, service string) error {
 	return nil
 }
 
-// service returns named service client or fails for undefined service.
-func (l *LocalClient) service(ctx context.Context, service string) (*httpmock.Client, context.Context, error) {
+// Service returns named service client or fails for undefined service.
+func (l *LocalClient) Service(ctx context.Context, service string) (*httpmock.Client, context.Context, error) {
 	service = strings.Trim(service, `" `)
 
 	if service == "" {
