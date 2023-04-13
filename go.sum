@@ -1,7 +1,7 @@
 github.com/bool64/dev v0.2.27 h1:mFT+B74mFVgUeUmm/EbfM6ELPA55lEXBjQ/AOHCwCOc=
 github.com/bool64/dev v0.2.27/go.mod h1:iJbh1y/HkunEPhgebWRNcs8wfGq7sjvJ6W5iabL8ACg=
-github.com/bool64/httpmock v0.1.8 h1:plNJylRdMGjNDV8kCuapKTJJS8p6zbvWbR8NG+Z6qAA=
-github.com/bool64/httpmock v0.1.8/go.mod h1:3T4cLULWI5qlTx+tSF6YaiAWq4IZ1aP//klpumgPj1s=
+github.com/bool64/httpmock v0.1.9 h1:YLQmIFEDA3Ub1pNCcHvyDLMN08QILqKDDUWx17XwjDk=
+github.com/bool64/httpmock v0.1.9/go.mod h1:vodDyrRL4hfWZ6/nvahVzSV4VSK6MSPf0MxyHNQXzuA=
 github.com/bool64/shared v0.1.5 h1:fp3eUhBsrSjNCQPcSdQqZxxh9bBwrYiZ+zOKFkM0/2E=
 github.com/bool64/shared v0.1.5/go.mod h1:081yz68YC9jeFB3+Bbmno2RFWvGKv1lPKkMP6MHJlPs=
 github.com/cpuguy83/go-md2man/v2 v2.0.1/go.mod h1:tgQtvFlXSQOSOSIRvRPT7W67SCa46tRHOmNcaadrF8o=

@@ -160,6 +160,25 @@ path/to/file.json
 """
 ```
 
+Instead of ignoring particular fields, you can match only specific fields.
+
+```gherkin
+And I should have response with body, that matches JSON
+"""
+[
+  {"some":"json"}
+]
+"""
+```
+
+```gherkin
+And I should have response with body, that matches JSON from file
+"""
+path/to/file.json
+"""
+```
+
+
 Status can be defined with either phrase or numeric code.
 
 ```gherkin
@@ -353,6 +372,17 @@ Here is an example where value from response of one step is used in request of a
     {
      "id":"<ignore-diff>",
      "created_at":"<ignore-diff>","updated_at": "<ignore-diff>",
+     "user_id":"$user_id"
+     "prefixed_user_id": "static_prefix::$user_id"
+    }
+    """
+
+    # Instead of ignoring fields with "<ignore-diff>" you can also match against a reduced JSON.
+    # All fields that are not present in the expected JSON are ignored.
+    # Step below is equivalent to the previous one.
+    And I should have response with body, that matches JSON
+    """json5
+    {
      "user_id":"$user_id"
      "prefixed_user_id": "static_prefix::$user_id"
     }

@@ -21,7 +21,7 @@ Feature: Table Setup
     And I should have "some-service" response with body
     """json
     [
-      {"some":"json"}
+      {"some":"json","dyn":"abc"}
     ]
     """
     And I should have "some-service" response with headers

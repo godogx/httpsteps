@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	github.com/bool64/dev v0.2.27
-	github.com/bool64/httpmock v0.1.8
+	github.com/bool64/httpmock v0.1.9
 	github.com/bool64/shared v0.1.5
 	github.com/cucumber/godog v0.12.6
 	github.com/godogx/resource v0.1.1
