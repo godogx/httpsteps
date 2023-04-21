@@ -21,6 +21,7 @@ import (
 	"github.com/cucumber/godog"
 	"github.com/godogx/resource"
 	"github.com/swaggest/assertjson/json5"
+	"github.com/yalp/jsonpath"
 )
 
 type sentinelError string
@@ -207,6 +208,7 @@ func (l *LocalClient) RegisterSteps(s *godog.ScenarioContext) {
 	s.Step(`^I should have(.*) response with body$`, l.iShouldHaveResponseWithBody)
 	s.Step(`^I should have(.*) response with body, that matches JSON from file$`, l.iShouldHaveResponseWithBodyThatMatchesJSONFromFile)
 	s.Step(`^I should have(.*) response with body, that matches JSON$`, l.iShouldHaveResponseWithBodyThatMatchesJSON)
+	s.Step(`^I should have(.*) response with body, that matches JSON paths$`, l.iShouldHaveResponseWithBodyThatMatchesJSONPaths)
 
 	s.Step(`^I should have(.*) other responses with status "([^"]*)"$`, l.iShouldHaveOtherResponsesWithStatus)
 	s.Step(`^I should have(.*) other responses with header "([^"]*): ([^"]*)"$`, l.iShouldHaveOtherResponsesWithHeader)
@@ -215,6 +217,7 @@ func (l *LocalClient) RegisterSteps(s *godog.ScenarioContext) {
 	s.Step(`^I should have(.*) other responses with body from file$`, l.iShouldHaveOtherResponsesWithBodyFromFile)
 	s.Step(`^I should have(.*) other responses with body, that matches JSON$`, l.iShouldHaveOtherResponsesWithBodyThatMatchesJSON)
 	s.Step(`^I should have(.*) other responses with body, that matches JSON from file$`, l.iShouldHaveOtherResponsesWithBodyThatMatchesJSONFromFile)
+	s.Step(`^I should have(.*) other responses with body, that matches JSON paths$`, l.iShouldHaveOtherResponsesWithBodyThatMatchesJSONPaths)
 }
 
 func (l *LocalClient) iRequestWithMethodAndURI(ctx context.Context, service, method, uri string) (context.Context, error) {
@@ -691,6 +694,46 @@ func (l *LocalClient) iShouldHaveResponseWithBodyThatMatchesJSON(ctx context.Con
 	})
 }
 
+func (l *LocalClient) assertResponseJSONPaths(c *httpmock.Client, jsonPaths *godog.Table) func(received []byte) error {
+	return func(received []byte) error {
+		var rcv interface{}
+		if err := json.Unmarshal(received, &rcv); err != nil {
+			return fmt.Errorf("failed to unmarshal response body: %w", err)
+		}
+
+		for _, row := range jsonPaths.Rows {
+			path := row.Cells[0].Value
+
+			v, err := jsonpath.Read(rcv, path)
+			if err != nil {
+				return fmt.Errorf("failed to read jsonpath %s: %w", path, err)
+			}
+
+			actual, err := json.Marshal(v)
+			if err != nil {
+				return fmt.Errorf("failed to marshal actual value at jsonpath %s: %w", path, err)
+			}
+
+			expected := []byte(row.Cells[1].Value)
+
+			if err := c.JSONComparer.FailMismatch(expected, actual); err != nil {
+				return fmt.Errorf("failed to assert jsonpath %s: %w", path, err)
+			}
+		}
+
+		return nil
+	}
+}
+
+func (l *LocalClient) iShouldHaveResponseWithBodyThatMatchesJSONPaths(ctx context.Context, service string, jsonPaths *godog.Table) (context.Context, error) {
+	c, ctx, err := l.Service(ctx, service)
+	if err != nil {
+		return ctx, err
+	}
+
+	return ctx, c.ExpectResponseBodyCallback(l.assertResponseJSONPaths(c, jsonPaths))
+}
+
 func (l *LocalClient) iShouldHaveResponseWithBodyThatMatchesJSONFromFile(ctx context.Context, service, filePath string) (context.Context, error) {
 	c, ctx, err := l.Service(ctx, service)
 	if err != nil {
@@ -749,6 +792,15 @@ func (l *LocalClient) iShouldHaveOtherResponsesWithBodyThatMatchesJSON(ctx conte
 	return ctx, c.ExpectOtherResponsesBodyCallback(func(received []byte) error {
 		return c.JSONComparer.FailMismatch(body, received)
 	})
+}
+
+func (l *LocalClient) iShouldHaveOtherResponsesWithBodyThatMatchesJSONPaths(ctx context.Context, service string, jsonPaths *godog.Table) (context.Context, error) {
+	c, ctx, err := l.Service(ctx, service)
+	if err != nil {
+		return ctx, err
+	}
+
+	return ctx, c.ExpectOtherResponsesBodyCallback(l.assertResponseJSONPaths(c, jsonPaths))
 }
 
 func (l *LocalClient) iShouldHaveOtherResponsesWithBodyThatMatchesJSONFromFile(ctx context.Context, service, filePath string) (context.Context, error) {

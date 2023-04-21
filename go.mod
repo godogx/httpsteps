@@ -10,6 +10,7 @@ require (
 	github.com/godogx/resource v0.1.1
 	github.com/stretchr/testify v1.8.2
 	github.com/swaggest/assertjson v1.8.0
+	github.com/yalp/jsonpath v0.0.0-20180802001716-5cc68e5049a0
 )
 
 require (

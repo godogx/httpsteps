@@ -60,6 +60,10 @@ Feature: HTTP Service
     """json
     {"status":"failed"}
     """
+    And I should have other responses with body, that matches JSON paths
+      | $.status | "failed" |
+      | $.error  | "foo"    |
+
     And I should have other responses with header "Content-Type: application/json"
 
   Scenario: POST with body with json5 comments
@@ -104,6 +108,12 @@ Feature: HTTP Service
       {"some":"json"}
     ]
     """
+    # Body can be asserted with JSON path expressions table,
+    # where first column is JSON path expression and second column is expected JSON value.
+    # It is also possible to capture/assert variable values (see "$dyn").
+    And I should have "some-service" response with body, that matches JSON paths
+      | $.*.some | ["json"] |
+      | $[0].dyn | "$dyn"   |
     And I should have "some-service" response with body, that matches JSON from file
     """
     _testdata/match.json

@@ -178,6 +178,18 @@ path/to/file.json
 """
 ```
 
+Another flavour of JSON matching is to match only specific fields with [JSON Path](https://github.com/yalp/jsonpath) notation.
+
+```gherkin
+    # Body can be asserted with JSON path expressions table,
+    # where first column is JSON path expression and second column is expected JSON value.
+    # It is also possible to capture/assert variable values (see "$dyn").
+    And I should have "some-service" response with body, that matches JSON paths
+    | $.*.some | ["json"] |
+    | $[0].dyn | "$dyn"   |
+```
+
+```gherkin
 
 Status can be defined with either phrase or numeric code.
 
