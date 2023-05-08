@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/godogx/vars"
 	"io"
 	"io/ioutil"
 	"mime/multipart"
@@ -57,7 +58,9 @@ type LocalClient struct {
 	services map[string]*httpmock.Client
 	options  []func(*httpmock.Client)
 
+	// Deprecated: use VS.
 	Vars *shared.Vars
+	VS   *vars.Steps
 }
 
 // AddService registers a URL for named service.

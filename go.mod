@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	github.com/bool64/dev v0.2.27
-	github.com/bool64/httpmock v0.1.9
+	github.com/bool64/httpmock v0.1.11
 	github.com/bool64/shared v0.1.5
 	github.com/cucumber/godog v0.12.6
 	github.com/godogx/resource v0.1.1
@@ -30,15 +30,11 @@ require (
 	github.com/yosuke-furukawa/json5 v0.1.2-0.20201207051438-cf7bb3f354ff // indirect
 	github.com/yudai/gojsondiff v1.0.0 // indirect
 	github.com/yudai/golcs v0.0.0-20170316035057-ecda9a501e82 // indirect
-	golang.org/x/net v0.0.0-20220722155237-a158d28d115b // indirect
-	golang.org/x/sys v0.0.0-20220722155257-8c9f86f7a55f // indirect
-	golang.org/x/text v0.3.8 // indirect
+	golang.org/x/text v0.9.0 // indirect
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/godogx/resource => /Users/vearutop/dev/resource
+replace github.com/godogx/resource => /home/vearutop/dev/resource
 
-replace github.com/godogx/vars => /Users/vearutop/dev/vars
-
-replace github.com/bool64/httpmock => /Users/vearutop/dev/httpmock
+replace github.com/godogx/vars => /home/vearutop/dev/vars

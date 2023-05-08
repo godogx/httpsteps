@@ -202,9 +202,7 @@ func (e *ExternalServer) mock(ctx context.Context, service string) (context.Cont
 		c.exp = nil
 		c.srv.ResetExpectations()
 
-		if e.Vars != nil {
-			ctx, c.srv.JSONComparer.Vars = e.Vars.Fork(ctx)
-		}
+		ctx, c.srv.JSONComparer.Vars = e.Vars.Fork(ctx)
 	}
 
 	return ctx, c, nil
