@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -19,7 +20,7 @@ import (
 	"github.com/bool64/httpmock"
 	"github.com/bool64/shared"
 	"github.com/cucumber/godog"
-	"github.com/godogx/resource"
+	_ "github.com/godogx/vars"
 	"github.com/swaggest/assertjson/json5"
 	"github.com/yalp/jsonpath"
 )
@@ -48,16 +49,6 @@ func NewLocalClient(defaultBaseURL string, options ...func(*httpmock.Client)) *L
 
 	l.AddService(Default, defaultBaseURL)
 
-	l.lock = resource.NewLock(func(service string) error {
-		if c, ok := l.services[service]; !ok {
-			return fmt.Errorf("%w: %s", errUnknownService, service)
-		} else if err := c.CheckUnexpectedOtherResponses(); err != nil {
-			return fmt.Errorf("no other responses expected for %s: %w", service, err)
-		}
-
-		return nil
-	})
-
 	return &l
 }
 
@@ -65,7 +56,6 @@ func NewLocalClient(defaultBaseURL string, options ...func(*httpmock.Client)) *L
 type LocalClient struct {
 	services map[string]*httpmock.Client
 	options  []func(*httpmock.Client)
-	lock     *resource.Lock
 
 	Vars *shared.Vars
 }
@@ -181,8 +171,6 @@ func (l *LocalClient) AddService(name, baseURL string) {
 //
 // More information at https://github.com/godogx/httpsteps/#local-client.
 func (l *LocalClient) RegisterSteps(s *godog.ScenarioContext) {
-	l.lock.Register(s)
-
 	s.Step(`^I request(.*) HTTP endpoint with method "([^"]*)" and URI (.*)$`, l.iRequestWithMethodAndURI)
 	s.Step(`^I request(.*) HTTP endpoint with body$`, l.iRequestWithBody)
 	s.Step(`^I request(.*) HTTP endpoint with body from file$`, l.iRequestWithBodyFromFile)
@@ -218,6 +206,35 @@ func (l *LocalClient) RegisterSteps(s *godog.ScenarioContext) {
 	s.Step(`^I should have(.*) other responses with body, that matches JSON$`, l.iShouldHaveOtherResponsesWithBodyThatMatchesJSON)
 	s.Step(`^I should have(.*) other responses with body, that matches JSON from file$`, l.iShouldHaveOtherResponsesWithBodyThatMatchesJSONFromFile)
 	s.Step(`^I should have(.*) other responses with body, that matches JSON paths$`, l.iShouldHaveOtherResponsesWithBodyThatMatchesJSONPaths)
+
+	s.After(l.afterScenario)
+}
+
+func (l *LocalClient) afterScenario(ctx context.Context, _ *godog.Scenario, err error) (context.Context, error) {
+	var errs []string
+
+	if err != nil {
+		errs = append(errs, err.Error())
+	}
+
+	for service := range l.services {
+		client, _, err := l.Service(ctx, service)
+		if err != nil {
+			errs = append(errs, service+": "+err.Error())
+
+			continue
+		}
+
+		if err := client.CheckUnexpectedOtherResponses(); err != nil {
+			errs = append(errs, fmt.Sprintf("no other responses expected for %s: %s", service, err.Error()))
+		}
+	}
+
+	if len(errs) > 0 {
+		return ctx, errors.New(strings.Join(errs, "\n"))
+	}
+
+	return ctx, nil
 }
 
 func (l *LocalClient) iRequestWithMethodAndURI(ctx context.Context, service, method, uri string) (context.Context, error) {
@@ -880,19 +897,10 @@ func (l *LocalClient) Service(ctx context.Context, service string) (*httpmock.Cl
 		return nil, ctx, fmt.Errorf("%w: %s", errUnknownService, service)
 	}
 
-	acquired, err := l.lock.Acquire(ctx, service)
-	if err != nil {
-		return nil, ctx, err
-	}
+	ctx, c = c.Fork(ctx)
 
-	// Reset client after acquiring lock.
-	if acquired {
-		c.Reset()
-		c.WithContext(ctx)
-
-		if l.Vars != nil {
-			ctx, c.JSONComparer.Vars = l.Vars.Fork(ctx)
-		}
+	if c.JSONComparer.Vars == nil {
+		ctx, c.JSONComparer.Vars = l.Vars.Fork(ctx)
 	}
 
 	return c, ctx, nil
