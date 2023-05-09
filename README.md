@@ -16,9 +16,9 @@ for [`github.com/cucumber/godog`](https://github.com/cucumber/godog).
 
 Local and remote services can be tested with client request configuration and response expectations.
 
-Please note, due to centralized nature of these mocks they can not be used concurrently by different scenarios.
-If multiple scenarios configure a shared service, they will be locked in a sync sequence.
-It is safe to use concurrent scenarios.
+Client does not attempt to limit concurrency of multiple `godog` scenarios, it is expected that either
+the service is capable to process multiple scenarios simultaneously, or scenarios are 
+[synchronized explicitly](https://github.com/godogx/resource#steps).
 
 #### Request Setup
 
@@ -250,7 +250,7 @@ requests and responses with gherkin steps.
 It is useful describe behavior of HTTP endpoints that are called by the app during test (e.g. 3rd party APIs).
 
 Please note, due to centralized nature of these mocks they can not be used concurrently by different scenarios. 
-If multiple scenarios configure a shared service, they will be locked in a sync sequence.
+If multiple scenarios configure a shared service, they will be [locked in a sync sequence](https://github.com/godogx/resource).
 It is safe to use concurrent scenarios.
 
 In simple case you can define expected URL and response.

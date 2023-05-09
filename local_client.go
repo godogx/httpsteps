@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -19,9 +20,8 @@ import (
 	"github.com/bool64/httpmock"
 	"github.com/bool64/shared"
 	"github.com/cucumber/godog"
-	"github.com/godogx/resource"
+	"github.com/godogx/vars"
 	"github.com/swaggest/assertjson/json5"
-	"github.com/yalp/jsonpath"
 )
 
 type sentinelError string
@@ -43,20 +43,9 @@ func NewLocalClient(defaultBaseURL string, options ...func(*httpmock.Client)) *L
 
 	l := LocalClient{
 		options: options,
-		Vars:    &shared.Vars{},
 	}
 
 	l.AddService(Default, defaultBaseURL)
-
-	l.lock = resource.NewLock(func(service string) error {
-		if c, ok := l.services[service]; !ok {
-			return fmt.Errorf("%w: %s", errUnknownService, service)
-		} else if err := c.CheckUnexpectedOtherResponses(); err != nil {
-			return fmt.Errorf("no other responses expected for %s: %w", service, err)
-		}
-
-		return nil
-	})
 
 	return &l
 }
@@ -65,9 +54,11 @@ func NewLocalClient(defaultBaseURL string, options ...func(*httpmock.Client)) *L
 type LocalClient struct {
 	services map[string]*httpmock.Client
 	options  []func(*httpmock.Client)
-	lock     *resource.Lock
 
+	// Deprecated: use VS.JSONComparer.Vars.
 	Vars *shared.Vars
+
+	VS *vars.Steps
 }
 
 // AddService registers a URL for named service.
@@ -181,8 +172,6 @@ func (l *LocalClient) AddService(name, baseURL string) {
 //
 // More information at https://github.com/godogx/httpsteps/#local-client.
 func (l *LocalClient) RegisterSteps(s *godog.ScenarioContext) {
-	l.lock.Register(s)
-
 	s.Step(`^I request(.*) HTTP endpoint with method "([^"]*)" and URI (.*)$`, l.iRequestWithMethodAndURI)
 	s.Step(`^I request(.*) HTTP endpoint with body$`, l.iRequestWithBody)
 	s.Step(`^I request(.*) HTTP endpoint with body from file$`, l.iRequestWithBodyFromFile)
@@ -218,6 +207,35 @@ func (l *LocalClient) RegisterSteps(s *godog.ScenarioContext) {
 	s.Step(`^I should have(.*) other responses with body, that matches JSON$`, l.iShouldHaveOtherResponsesWithBodyThatMatchesJSON)
 	s.Step(`^I should have(.*) other responses with body, that matches JSON from file$`, l.iShouldHaveOtherResponsesWithBodyThatMatchesJSONFromFile)
 	s.Step(`^I should have(.*) other responses with body, that matches JSON paths$`, l.iShouldHaveOtherResponsesWithBodyThatMatchesJSONPaths)
+
+	s.After(l.afterScenario)
+}
+
+func (l *LocalClient) afterScenario(ctx context.Context, _ *godog.Scenario, err error) (context.Context, error) {
+	var errs []string
+
+	if err != nil {
+		errs = append(errs, err.Error())
+	}
+
+	for service := range l.services {
+		client, _, err := l.Service(ctx, service)
+		if err != nil {
+			errs = append(errs, service+": "+err.Error())
+
+			continue
+		}
+
+		if err := client.CheckUnexpectedOtherResponses(); err != nil {
+			errs = append(errs, fmt.Sprintf("no other responses expected for %s: %s", service, err.Error()))
+		}
+	}
+
+	if len(errs) > 0 {
+		return ctx, errors.New(strings.Join(errs, "\n")) //nolint:goerr113
+	}
+
+	return ctx, nil
 }
 
 func (l *LocalClient) iRequestWithMethodAndURI(ctx context.Context, service, method, uri string) (context.Context, error) {
@@ -232,18 +250,21 @@ func (l *LocalClient) iRequestWithMethodAndURI(ctx context.Context, service, met
 
 	uri = strings.Trim(uri, `"`)
 
-	if uri, err = replaceString(uri, c.JSONComparer.Vars); err != nil {
+	ctx, rv, err := l.VS.Replace(ctx, []byte(uri))
+	if err != nil {
 		return ctx, fmt.Errorf("failed to replace vars in URI: %w", err)
 	}
 
 	c.Reset()
 	c.WithMethod(method)
-	c.WithURI(uri)
+	c.WithURI(string(rv))
 
 	return ctx, nil
 }
 
 // LoadBodyFromFile loads body from file and replaces vars in it.
+//
+// Deprecated: use github.com/godogx/vars.(*Steps).ReplaceFile.
 func LoadBodyFromFile(filePath string, vars *shared.Vars) ([]byte, error) {
 	body, err := ioutil.ReadFile(filePath) //nolint // File inclusion via variable during tests.
 	if err != nil {
@@ -254,6 +275,8 @@ func LoadBodyFromFile(filePath string, vars *shared.Vars) ([]byte, error) {
 }
 
 // LoadBody loads body from bytes and replaces vars in it.
+//
+// Deprecated: use github.com/godogx/vars.(*Steps).Replace.
 func LoadBody(body []byte, vars *shared.Vars) ([]byte, error) {
 	var err error
 
@@ -299,48 +322,13 @@ func LoadBody(body []byte, vars *shared.Vars) ([]byte, error) {
 	return body, nil
 }
 
-func replaceString(s string, vars *shared.Vars) (string, error) {
-	if vars != nil {
-		type kv struct {
-			k string
-			v string
-		}
-
-		vv := vars.GetAll()
-		kvs := make([]kv, 0, len(vv))
-
-		for k, v := range vv {
-			vs, err := json.Marshal(v)
-			if err != nil {
-				return "", fmt.Errorf("failed to marshal var %s (%v): %w", k, v, err)
-			}
-
-			if vs[0] == '"' {
-				vs = bytes.Trim(vs, `"`)
-			}
-
-			kvs = append(kvs, kv{k: k, v: string(vs)})
-		}
-
-		sort.Slice(kvs, func(i, j int) bool {
-			return len(kvs[i].k) > len(kvs[j].k)
-		})
-
-		for _, kv := range kvs {
-			s = strings.ReplaceAll(s, kv.k, kv.v)
-		}
-	}
-
-	return s, nil
-}
-
 func (l *LocalClient) iRequestWithBodyFromFile(ctx context.Context, service string, filePath string) (context.Context, error) {
 	c, ctx, err := l.Service(ctx, service)
 	if err != nil {
 		return ctx, err
 	}
 
-	body, err := LoadBodyFromFile(filePath, c.JSONComparer.Vars)
+	ctx, body, err := l.VS.ReplaceFile(ctx, filePath)
 	if err == nil {
 		c.WithBody(body)
 	}
@@ -354,7 +342,7 @@ func (l *LocalClient) iRequestWithBody(ctx context.Context, service string, body
 		return ctx, err
 	}
 
-	body, err := LoadBody([]byte(bodyDoc), c.JSONComparer.Vars)
+	ctx, body, err := l.VS.Replace(ctx, []byte(bodyDoc))
 
 	if err == nil {
 		c.WithBody(body)
@@ -369,11 +357,12 @@ func (l *LocalClient) iRequestWithHeader(ctx context.Context, service, key, valu
 		return ctx, err
 	}
 
-	if value, err = replaceString(value, c.JSONComparer.Vars); err != nil {
+	ctx, rv, err := l.VS.Replace(ctx, []byte(value))
+	if err != nil {
 		return ctx, fmt.Errorf("failed to replace vars in header %s: %w", key, err)
 	}
 
-	c.WithHeader(key, value)
+	c.WithHeader(key, string(rv))
 
 	return ctx, nil
 }
@@ -398,7 +387,6 @@ func mapOfData(data *godog.Table) (url.Values, error) {
 func (l *LocalClient) tableSetup(
 	ctx context.Context,
 	data *godog.Table,
-	vr *shared.Vars,
 	receiverName string,
 	receiver func(name, value string) *httpmock.Client,
 ) (context.Context, error) {
@@ -407,13 +395,16 @@ func (l *LocalClient) tableSetup(
 		return ctx, err
 	}
 
+	var rv []byte
+
 	for key, values := range m {
 		for _, value := range values {
-			if value, err = replaceString(value, vr); err != nil {
+			ctx, rv, err = l.VS.Replace(ctx, []byte(value))
+			if err != nil {
 				return ctx, fmt.Errorf("failed to replace vars in %s %s: %w", receiverName, key, err)
 			}
 
-			receiver(key, value)
+			receiver(key, string(rv))
 		}
 	}
 
@@ -426,7 +417,7 @@ func (l *LocalClient) iRequestWithFormDataParameters(ctx context.Context, servic
 		return ctx, err
 	}
 
-	return l.tableSetup(ctx, data, c.JSONComparer.Vars, "form data parameter", c.WithURLEncodedFormDataParam)
+	return l.tableSetup(ctx, data, "form data parameter", c.WithURLEncodedFormDataParam)
 }
 
 func (l *LocalClient) iRequestWithQueryParameters(ctx context.Context, service string, data *godog.Table) (context.Context, error) {
@@ -435,7 +426,7 @@ func (l *LocalClient) iRequestWithQueryParameters(ctx context.Context, service s
 		return ctx, err
 	}
 
-	return l.tableSetup(ctx, data, c.JSONComparer.Vars, "query parameter", c.WithQueryParam)
+	return l.tableSetup(ctx, data, "query parameter", c.WithQueryParam)
 }
 
 func (l *LocalClient) iRequestWithHeaders(ctx context.Context, service string, data *godog.Table) (context.Context, error) {
@@ -444,7 +435,7 @@ func (l *LocalClient) iRequestWithHeaders(ctx context.Context, service string, d
 		return ctx, err
 	}
 
-	return l.tableSetup(ctx, data, c.JSONComparer.Vars, "header", c.WithHeader)
+	return l.tableSetup(ctx, data, "header", c.WithHeader)
 }
 
 func (l *LocalClient) iRequestWithCookie(ctx context.Context, service, name, value string) (context.Context, error) {
@@ -453,11 +444,12 @@ func (l *LocalClient) iRequestWithCookie(ctx context.Context, service, name, val
 		return ctx, err
 	}
 
-	if value, err = replaceString(value, c.JSONComparer.Vars); err != nil {
+	ctx, rv, err := l.VS.Replace(ctx, []byte(value))
+	if err != nil {
 		return ctx, fmt.Errorf("failed to replace vars in cookie %s: %w", name, err)
 	}
 
-	c.WithCookie(name, value)
+	c.WithCookie(name, string(rv))
 
 	return ctx, nil
 }
@@ -468,7 +460,7 @@ func (l *LocalClient) iRequestWithCookies(ctx context.Context, service string, d
 		return ctx, err
 	}
 
-	return l.tableSetup(ctx, data, c.JSONComparer.Vars, "cookie", c.WithCookie)
+	return l.tableSetup(ctx, data, "cookie", c.WithCookie)
 }
 
 func (l *LocalClient) iRequestWithAttachment(ctx context.Context, service, fieldName, fileName string, fileContent string) (context.Context, error) {
@@ -477,7 +469,7 @@ func (l *LocalClient) iRequestWithAttachment(ctx context.Context, service, field
 		return ctx, err
 	}
 
-	body, contentType, err := appendAttachmentFileIntoBody(strings.NewReader(fileContent), fieldName, fileName, c.JSONComparer.Vars)
+	ctx, body, contentType, err := l.appendAttachmentFileIntoBody(ctx, strings.NewReader(fileContent), fieldName, fileName)
 	if err == nil {
 		c.WithBody(body)
 		c.WithContentType(contentType)
@@ -498,7 +490,7 @@ func (l *LocalClient) iRequestWithAttachmentFromFile(ctx context.Context, servic
 	}
 	defer file.Close() //nolint: gosec, errcheck
 
-	body, contentType, err := appendAttachmentFileIntoBody(file, fieldName, filepath.Base(filePath), c.JSONComparer.Vars)
+	ctx, body, contentType, err := l.appendAttachmentFileIntoBody(ctx, file, fieldName, filepath.Base(filePath))
 	if err == nil {
 		c.WithBody(body)
 		c.WithContentType(contentType)
@@ -507,31 +499,31 @@ func (l *LocalClient) iRequestWithAttachmentFromFile(ctx context.Context, servic
 	return ctx, err
 }
 
-func appendAttachmentFileIntoBody(file io.Reader, fieldName, fileName string, vars *shared.Vars) ([]byte, string, error) {
+func (l *LocalClient) appendAttachmentFileIntoBody(ctx context.Context, file io.Reader, fieldName, fileName string) (context.Context, []byte, string, error) {
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 
 	part, err := writer.CreateFormFile(fieldName, fileName)
 	if err != nil {
-		return nil, "", err
+		return ctx, nil, "", err
 	}
 
 	_, err = io.Copy(part, file)
 	if err != nil {
-		return nil, "", err
+		return ctx, nil, "", err
 	}
 
 	err = writer.Close()
 	if err != nil {
-		return nil, "", err
+		return ctx, nil, "", err
 	}
 
-	resBody, err := LoadBody(body.Bytes(), vars)
+	ctx, resBody, err := l.VS.Replace(ctx, body.Bytes())
 	if err != nil {
-		return nil, "", err
+		return ctx, nil, "", err
 	}
 
-	return resBody, writer.FormDataContentType(), nil
+	return ctx, resBody, writer.FormDataContentType(), nil
 }
 
 const (
@@ -545,6 +537,7 @@ const (
 	errUnknownService         = sentinelError("unknown service")
 	errUnexpectedExpectations = sentinelError("unexpected existing expectations")
 	errInvalidNumberOfColumns = sentinelError("invalid number of columns")
+	errUnexpectedBody         = sentinelError("unexpected body")
 )
 
 func statusCode(statusOrCode string) (int, error) {
@@ -656,12 +649,13 @@ func (l *LocalClient) iShouldHaveResponseWithBody(ctx context.Context, service, 
 		return ctx, err
 	}
 
-	body, err := LoadBody([]byte(bodyDoc), c.JSONComparer.Vars)
-	if err != nil {
-		return ctx, err
-	}
+	err = c.ExpectResponseBodyCallback(func(received []byte) error {
+		ctx, err = augmentBodyErr(l.VS.Assert(ctx, []byte(bodyDoc), received, false))
 
-	return ctx, c.ExpectResponseBody(body)
+		return err
+	})
+
+	return ctx, err
 }
 
 func (l *LocalClient) iShouldHaveResponseWithBodyFromFile(ctx context.Context, service, filePath string) (context.Context, error) {
@@ -670,12 +664,13 @@ func (l *LocalClient) iShouldHaveResponseWithBodyFromFile(ctx context.Context, s
 		return ctx, err
 	}
 
-	body, err := LoadBodyFromFile(filePath, c.JSONComparer.Vars)
-	if err != nil {
-		return ctx, err
-	}
+	err = c.ExpectResponseBodyCallback(func(received []byte) error {
+		ctx, err = augmentBodyErr(l.VS.AssertFile(ctx, filePath, received, false))
 
-	return ctx, c.ExpectResponseBody(body)
+		return err
+	})
+
+	return ctx, err
 }
 
 func (l *LocalClient) iShouldHaveResponseWithBodyThatMatchesJSON(ctx context.Context, service, bodyDoc string) (context.Context, error) {
@@ -684,45 +679,21 @@ func (l *LocalClient) iShouldHaveResponseWithBodyThatMatchesJSON(ctx context.Con
 		return ctx, err
 	}
 
-	body, err := LoadBody([]byte(bodyDoc), c.JSONComparer.Vars)
-	if err != nil {
-		return ctx, err
-	}
+	err = c.ExpectResponseBodyCallback(func(received []byte) error {
+		ctx, err = augmentBodyErr(l.VS.Assert(ctx, []byte(bodyDoc), received, true))
 
-	return ctx, c.ExpectResponseBodyCallback(func(received []byte) error {
-		return c.JSONComparer.FailMismatch(body, received)
+		return err
 	})
+
+	return ctx, err
 }
 
-func (l *LocalClient) assertResponseJSONPaths(c *httpmock.Client, jsonPaths *godog.Table) func(received []byte) error {
-	return func(received []byte) error {
-		var rcv interface{}
-		if err := json.Unmarshal(received, &rcv); err != nil {
-			return fmt.Errorf("failed to unmarshal response body: %w", err)
-		}
-
-		for _, row := range jsonPaths.Rows {
-			path := row.Cells[0].Value
-
-			v, err := jsonpath.Read(rcv, path)
-			if err != nil {
-				return fmt.Errorf("failed to read jsonpath %s: %w", path, err)
-			}
-
-			actual, err := json.Marshal(v)
-			if err != nil {
-				return fmt.Errorf("failed to marshal actual value at jsonpath %s: %w", path, err)
-			}
-
-			expected := []byte(row.Cells[1].Value)
-
-			if err := c.JSONComparer.FailMismatch(expected, actual); err != nil {
-				return fmt.Errorf("failed to assert jsonpath %s: %w", path, err)
-			}
-		}
-
-		return nil
+func augmentBodyErr(ctx context.Context, err error) (context.Context, error) {
+	if err != nil {
+		return ctx, fmt.Errorf("%w %s", errUnexpectedBody, err.Error())
 	}
+
+	return ctx, nil
 }
 
 func (l *LocalClient) iShouldHaveResponseWithBodyThatMatchesJSONPaths(ctx context.Context, service string, jsonPaths *godog.Table) (context.Context, error) {
@@ -731,7 +702,13 @@ func (l *LocalClient) iShouldHaveResponseWithBodyThatMatchesJSONPaths(ctx contex
 		return ctx, err
 	}
 
-	return ctx, c.ExpectResponseBodyCallback(l.assertResponseJSONPaths(c, jsonPaths))
+	err = c.ExpectResponseBodyCallback(func(received []byte) error {
+		ctx, err = augmentBodyErr(l.VS.AssertJSONPaths(ctx, jsonPaths, received, true))
+
+		return err
+	})
+
+	return ctx, err
 }
 
 func (l *LocalClient) iShouldHaveResponseWithBodyThatMatchesJSONFromFile(ctx context.Context, service, filePath string) (context.Context, error) {
@@ -740,14 +717,13 @@ func (l *LocalClient) iShouldHaveResponseWithBodyThatMatchesJSONFromFile(ctx con
 		return ctx, err
 	}
 
-	body, err := LoadBodyFromFile(filePath, c.JSONComparer.Vars)
-	if err != nil {
-		return ctx, err
-	}
+	err = c.ExpectResponseBodyCallback(func(received []byte) error {
+		ctx, err = augmentBodyErr(l.VS.AssertFile(ctx, filePath, received, true))
 
-	return ctx, c.ExpectResponseBodyCallback(func(received []byte) error {
-		return c.JSONComparer.FailMismatch(body, received)
+		return err
 	})
+
+	return ctx, err
 }
 
 func (l *LocalClient) iShouldHaveOtherResponsesWithBody(ctx context.Context, service, bodyDoc string) (context.Context, error) {
@@ -756,12 +732,13 @@ func (l *LocalClient) iShouldHaveOtherResponsesWithBody(ctx context.Context, ser
 		return ctx, err
 	}
 
-	body, err := LoadBody([]byte(bodyDoc), c.JSONComparer.Vars)
-	if err != nil {
-		return ctx, err
-	}
+	err = c.ExpectOtherResponsesBodyCallback(func(received []byte) error {
+		ctx, err = augmentBodyErr(l.VS.Assert(ctx, []byte(bodyDoc), received, false))
 
-	return ctx, c.ExpectOtherResponsesBody(body)
+		return err
+	})
+
+	return ctx, err
 }
 
 func (l *LocalClient) iShouldHaveOtherResponsesWithBodyFromFile(ctx context.Context, service, filePath string) (context.Context, error) {
@@ -770,12 +747,13 @@ func (l *LocalClient) iShouldHaveOtherResponsesWithBodyFromFile(ctx context.Cont
 		return ctx, err
 	}
 
-	body, err := LoadBodyFromFile(filePath, c.JSONComparer.Vars)
-	if err != nil {
-		return ctx, err
-	}
+	err = c.ExpectOtherResponsesBodyCallback(func(received []byte) error {
+		ctx, err = augmentBodyErr(l.VS.AssertFile(ctx, filePath, received, false))
 
-	return ctx, c.ExpectOtherResponsesBody(body)
+		return err
+	})
+
+	return ctx, err
 }
 
 func (l *LocalClient) iShouldHaveOtherResponsesWithBodyThatMatchesJSON(ctx context.Context, service, bodyDoc string) (context.Context, error) {
@@ -784,14 +762,13 @@ func (l *LocalClient) iShouldHaveOtherResponsesWithBodyThatMatchesJSON(ctx conte
 		return ctx, err
 	}
 
-	body, err := LoadBody([]byte(bodyDoc), c.JSONComparer.Vars)
-	if err != nil {
-		return ctx, err
-	}
+	err = c.ExpectOtherResponsesBodyCallback(func(received []byte) error {
+		ctx, err = augmentBodyErr(l.VS.Assert(ctx, []byte(bodyDoc), received, true))
 
-	return ctx, c.ExpectOtherResponsesBodyCallback(func(received []byte) error {
-		return c.JSONComparer.FailMismatch(body, received)
+		return err
 	})
+
+	return ctx, err
 }
 
 func (l *LocalClient) iShouldHaveOtherResponsesWithBodyThatMatchesJSONPaths(ctx context.Context, service string, jsonPaths *godog.Table) (context.Context, error) {
@@ -800,7 +777,13 @@ func (l *LocalClient) iShouldHaveOtherResponsesWithBodyThatMatchesJSONPaths(ctx 
 		return ctx, err
 	}
 
-	return ctx, c.ExpectOtherResponsesBodyCallback(l.assertResponseJSONPaths(c, jsonPaths))
+	err = c.ExpectOtherResponsesBodyCallback(func(received []byte) error {
+		ctx, err = augmentBodyErr(l.VS.AssertJSONPaths(ctx, jsonPaths, received, true))
+
+		return err
+	})
+
+	return ctx, err
 }
 
 func (l *LocalClient) iShouldHaveOtherResponsesWithBodyThatMatchesJSONFromFile(ctx context.Context, service, filePath string) (context.Context, error) {
@@ -809,14 +792,13 @@ func (l *LocalClient) iShouldHaveOtherResponsesWithBodyThatMatchesJSONFromFile(c
 		return ctx, err
 	}
 
-	body, err := LoadBodyFromFile(filePath, c.JSONComparer.Vars)
-	if err != nil {
-		return ctx, err
-	}
+	err = c.ExpectOtherResponsesBodyCallback(func(received []byte) error {
+		ctx, err = augmentBodyErr(l.VS.AssertFile(ctx, filePath, received, false))
 
-	return ctx, c.ExpectOtherResponsesBodyCallback(func(received []byte) error {
-		return c.JSONComparer.FailMismatch(body, received)
+		return err
 	})
+
+	return ctx, err
 }
 
 func (l *LocalClient) iFollowRedirects(ctx context.Context, service string) (context.Context, error) {
@@ -880,20 +862,7 @@ func (l *LocalClient) Service(ctx context.Context, service string) (*httpmock.Cl
 		return nil, ctx, fmt.Errorf("%w: %s", errUnknownService, service)
 	}
 
-	acquired, err := l.lock.Acquire(ctx, service)
-	if err != nil {
-		return nil, ctx, err
-	}
-
-	// Reset client after acquiring lock.
-	if acquired {
-		c.Reset()
-		c.WithContext(ctx)
-
-		if l.Vars != nil {
-			ctx, c.JSONComparer.Vars = l.Vars.Fork(ctx)
-		}
-	}
+	ctx, c = c.Fork(ctx)
 
 	return c, ctx, nil
 }

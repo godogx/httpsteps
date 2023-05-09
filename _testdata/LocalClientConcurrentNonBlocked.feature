@@ -12,7 +12,6 @@ Feature: Local Client is safe to use under concurrency (blocked).
     """
     And I should have "service-one" response with status "OK"
     And I should have "service-one" response with header "Content-Type: application/json"
-    And there is only one scenario running
 
   Scenario: Requesting service-two
     When I request "service-two" HTTP endpoint with method "GET" and URI "/get-something?service=two"
@@ -26,7 +25,6 @@ Feature: Local Client is safe to use under concurrency (blocked).
     """
     And I should have "service-two" response with status "OK"
     And I should have "service-two" response with header "Content-Type: application/json"
-    And there is only one scenario running
 
   Scenario: Requesting both services
     When I request "service-one" HTTP endpoint with method "GET" and URI "/get-something?service=one"
@@ -52,4 +50,3 @@ Feature: Local Client is safe to use under concurrency (blocked).
     """
     And I should have "service-two" response with status "OK"
     And I should have "service-two" response with header "Content-Type: application/json"
-    And there is only one scenario running
