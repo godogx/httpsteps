@@ -37,7 +37,7 @@ func TestDynamic(t *testing.T) {
 	local := httpsteps.NewLocalClient(u)
 
 	varIsMore := func(ctx context.Context, newVar string, val int64, oldVar string) (context.Context, error) {
-		ctx, v := vars.Fork(ctx)
+		ctx, v := vars.Vars(ctx)
 
 		oldVal, ok := v.Get("$" + oldVar)
 		if !ok {

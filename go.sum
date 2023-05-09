@@ -19,8 +19,8 @@ github.com/fsnotify/fsnotify v1.4.9 h1:hsms1Qyu0jgnwNXIxa+/V/PDsU6CfLf6CNO8H7IWo
 github.com/fsnotify/fsnotify v1.4.9/go.mod h1:znqG4EE+3YCdAaPaxE2ZRY/06pZUdp0tY4IgpuI1SZQ=
 github.com/godogx/resource v0.1.1 h1:1vbznIn1mUCP+9TzJp9v8QKm54kAMTe38CBLnFBk0j8=
 github.com/godogx/resource v0.1.1/go.mod h1:OYaiyttuq2KaiJp2yOMekyOFjZJFz3w/D7WPioUVC4Y=
-github.com/godogx/vars v0.1.5-0.20230509011251-ae1ab316a3b8 h1:xEhEbRuZlUCX5sOTfmwMxiRGMjkc3qTfVCHjMjPn66k=
-github.com/godogx/vars v0.1.5-0.20230509011251-ae1ab316a3b8/go.mod h1:XU1DJ+n9y9v4VpQ1eOpdzLU85KEVcclWFj6lIo91QJk=
+github.com/godogx/vars v0.1.5-0.20230509201235-4359480f9c27 h1:/ZVfBZnI16OO/NAYIMtnx/nT24rVLEz5p1+HUk8KmCM=
+github.com/godogx/vars v0.1.5-0.20230509201235-4359480f9c27/go.mod h1:ALGgGk/Lu+APce8uanQrHuO2Ur5ap1OwRIDfFleTBnE=
 github.com/gofrs/uuid v4.0.0+incompatible/go.mod h1:b2aQJv3Z4Fp6yNu3cdSllBxTCLRxnplIgP/c0N/04lM=
 github.com/gofrs/uuid v4.2.0+incompatible/go.mod h1:b2aQJv3Z4Fp6yNu3cdSllBxTCLRxnplIgP/c0N/04lM=
 github.com/gofrs/uuid v4.4.0+incompatible h1:3qXRTX8/NbyulANqlc0lchS1gqAVxRgsuW1YrTJupqA=

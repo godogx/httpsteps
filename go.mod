@@ -8,10 +8,9 @@ require (
 	github.com/bool64/shared v0.1.5
 	github.com/cucumber/godog v0.12.6
 	github.com/godogx/resource v0.1.1
-	github.com/godogx/vars v0.1.5-0.20230509011251-ae1ab316a3b8
+	github.com/godogx/vars v0.1.5-0.20230509201235-4359480f9c27
 	github.com/stretchr/testify v1.8.2
 	github.com/swaggest/assertjson v1.8.1
-	github.com/yalp/jsonpath v0.0.0-20180802001716-5cc68e5049a0
 )
 
 require (
@@ -27,6 +26,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/sergi/go-diff v1.3.1 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
+	github.com/yalp/jsonpath v0.0.0-20180802001716-5cc68e5049a0 // indirect
 	github.com/yosuke-furukawa/json5 v0.1.2-0.20201207051438-cf7bb3f354ff // indirect
 	github.com/yudai/gojsondiff v1.0.0 // indirect
 	github.com/yudai/golcs v0.0.0-20170316035057-ecda9a501e82 // indirect

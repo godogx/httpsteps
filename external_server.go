@@ -255,7 +255,7 @@ func (e *ExternalServer) serviceRequestIncludesHeader(ctx context.Context, servi
 }
 
 func (e *ExternalServer) serviceReceivesRequestWithBody(ctx context.Context, service, method, requestURI string, bodyDoc string) (context.Context, error) {
-	ctx, body, err := e.VS.ReplaceBytes(ctx, []byte(bodyDoc))
+	ctx, body, err := e.VS.Replace(ctx, []byte(bodyDoc))
 	if err != nil {
 		return ctx, err
 	}
@@ -264,7 +264,7 @@ func (e *ExternalServer) serviceReceivesRequestWithBody(ctx context.Context, ser
 }
 
 func (e *ExternalServer) serviceReceivesRequestWithBodyFromFile(ctx context.Context, service, method, requestURI string, filePath string) (context.Context, error) {
-	ctx, body, err := e.VS.ReplaceBytesFromFile(ctx, filePath)
+	ctx, body, err := e.VS.ReplaceFile(ctx, filePath)
 	if err != nil {
 		return ctx, err
 	}
@@ -368,7 +368,7 @@ func (e *ExternalServer) serviceResponseIncludesHeader(ctx context.Context, serv
 }
 
 func (e *ExternalServer) serviceRespondsWithStatusAndBody(ctx context.Context, service, statusOrCode string, bodyDoc string) (context.Context, error) {
-	ctx, body, err := e.VS.ReplaceBytes(ctx, []byte(bodyDoc))
+	ctx, body, err := e.VS.Replace(ctx, []byte(bodyDoc))
 	if err != nil {
 		return ctx, err
 	}
@@ -377,7 +377,7 @@ func (e *ExternalServer) serviceRespondsWithStatusAndBody(ctx context.Context, s
 }
 
 func (e *ExternalServer) serviceRespondsWithStatusAndBodyFromFile(ctx context.Context, service, statusOrCode string, filePath string) (context.Context, error) {
-	ctx, body, err := e.VS.ReplaceBytesFromFile(ctx, filePath)
+	ctx, body, err := e.VS.ReplaceFile(ctx, filePath)
 	if err != nil {
 		return ctx, err
 	}

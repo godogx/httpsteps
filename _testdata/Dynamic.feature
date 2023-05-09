@@ -40,6 +40,7 @@ Feature: Dynamic data is used in steps
      "id":"<ignore-diff>",
      "created_at":"<ignore-diff>","updated_at": "<ignore-diff>",
      "prefixed_user_id":"static_prefix::$user_id",
+     "user_id":"$user_id",
      "prefixed_user": "static_prefix::$user"
     }
     """
