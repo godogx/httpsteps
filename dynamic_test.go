@@ -9,6 +9,7 @@ import (
 	"github.com/bool64/httpmock"
 	"github.com/cucumber/godog"
 	"github.com/godogx/httpsteps"
+	"github.com/godogx/vars"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -36,7 +37,7 @@ func TestDynamic(t *testing.T) {
 	local := httpsteps.NewLocalClient(u)
 
 	varIsMore := func(ctx context.Context, newVar string, val int64, oldVar string) (context.Context, error) {
-		ctx, v := local.Vars.Fork(ctx)
+		ctx, v := vars.Fork(ctx)
 
 		oldVal, ok := v.Get("$" + oldVar)
 		if !ok {

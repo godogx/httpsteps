@@ -4,11 +4,11 @@ go 1.18
 
 require (
 	github.com/bool64/dev v0.2.27
-	github.com/bool64/httpmock v0.1.11
+	github.com/bool64/httpmock v0.1.12
 	github.com/bool64/shared v0.1.5
 	github.com/cucumber/godog v0.12.6
 	github.com/godogx/resource v0.1.1
-	github.com/godogx/vars v0.1.4
+	github.com/godogx/vars v0.1.5-0.20230509011251-ae1ab316a3b8
 	github.com/stretchr/testify v1.8.2
 	github.com/swaggest/assertjson v1.8.1
 	github.com/yalp/jsonpath v0.0.0-20180802001716-5cc68e5049a0
@@ -34,7 +34,3 @@ require (
 	gopkg.in/tomb.v1 v1.0.0-20141024135613-dd632973f1e7 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/godogx/resource => /home/vearutop/dev/resource
-
-replace github.com/godogx/vars => /home/vearutop/dev/vars

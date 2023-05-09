@@ -9,6 +9,7 @@ import (
 	"github.com/bool64/shared"
 	"github.com/cucumber/godog"
 	"github.com/godogx/resource"
+	"github.com/godogx/vars"
 )
 
 type exp struct {
@@ -37,7 +38,6 @@ func NewExternalServer() *ExternalServer {
 
 		return nil
 	})
-	es.Vars = &shared.Vars{}
 
 	return es
 }
@@ -49,7 +49,11 @@ type ExternalServer struct {
 	mocks map[string]*mock
 	lock  *resource.Lock
 
+	// Deprecated: use VS.JSONComparer.Vars to seed initial values if necessary.
 	Vars *shared.Vars
+
+	VS         *vars.Steps
+	Concurrent bool
 }
 
 type mock struct {
@@ -201,8 +205,6 @@ func (e *ExternalServer) mock(ctx context.Context, service string) (context.Cont
 	if acquired {
 		c.exp = nil
 		c.srv.ResetExpectations()
-
-		ctx, c.srv.JSONComparer.Vars = e.Vars.Fork(ctx)
 	}
 
 	return ctx, c, nil
@@ -253,12 +255,7 @@ func (e *ExternalServer) serviceRequestIncludesHeader(ctx context.Context, servi
 }
 
 func (e *ExternalServer) serviceReceivesRequestWithBody(ctx context.Context, service, method, requestURI string, bodyDoc string) (context.Context, error) {
-	ctx, m, err := e.mock(ctx, service)
-	if err != nil {
-		return ctx, err
-	}
-
-	body, err := LoadBody([]byte(bodyDoc), m.srv.JSONComparer.Vars)
+	ctx, body, err := e.VS.ReplaceBytes(ctx, []byte(bodyDoc))
 	if err != nil {
 		return ctx, err
 	}
@@ -267,12 +264,7 @@ func (e *ExternalServer) serviceReceivesRequestWithBody(ctx context.Context, ser
 }
 
 func (e *ExternalServer) serviceReceivesRequestWithBodyFromFile(ctx context.Context, service, method, requestURI string, filePath string) (context.Context, error) {
-	ctx, m, err := e.mock(ctx, service)
-	if err != nil {
-		return ctx, err
-	}
-
-	body, err := LoadBodyFromFile(filePath, m.srv.JSONComparer.Vars)
+	ctx, body, err := e.VS.ReplaceBytesFromFile(ctx, filePath)
 	if err != nil {
 		return ctx, err
 	}
@@ -376,12 +368,7 @@ func (e *ExternalServer) serviceResponseIncludesHeader(ctx context.Context, serv
 }
 
 func (e *ExternalServer) serviceRespondsWithStatusAndBody(ctx context.Context, service, statusOrCode string, bodyDoc string) (context.Context, error) {
-	ctx, m, err := e.mock(ctx, service)
-	if err != nil {
-		return ctx, err
-	}
-
-	body, err := LoadBody([]byte(bodyDoc), m.srv.JSONComparer.Vars)
+	ctx, body, err := e.VS.ReplaceBytes(ctx, []byte(bodyDoc))
 	if err != nil {
 		return ctx, err
 	}
@@ -390,12 +377,7 @@ func (e *ExternalServer) serviceRespondsWithStatusAndBody(ctx context.Context, s
 }
 
 func (e *ExternalServer) serviceRespondsWithStatusAndBodyFromFile(ctx context.Context, service, statusOrCode string, filePath string) (context.Context, error) {
-	ctx, m, err := e.mock(ctx, service)
-	if err != nil {
-		return ctx, err
-	}
-
-	body, err := LoadBodyFromFile(filePath, m.srv.JSONComparer.Vars)
+	ctx, body, err := e.VS.ReplaceBytesFromFile(ctx, filePath)
 	if err != nil {
 		return ctx, err
 	}
