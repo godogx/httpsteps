@@ -52,8 +52,7 @@ type ExternalServer struct {
 	// Deprecated: use VS.JSONComparer.Vars to seed initial values if necessary.
 	Vars *shared.Vars
 
-	VS         *vars.Steps
-	Concurrent bool
+	VS *vars.Steps
 }
 
 type mock struct {
