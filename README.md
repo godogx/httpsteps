@@ -133,6 +133,19 @@ Or for a named service.
 And I concurrently request idempotent "some-service" HTTP endpoint
 ```
 
+In case of flakyness or async operation you can use retries with exponential backoff to improve resiliency.
+Retry limit should be configured before any response expectations.
+Only first response expectation is used as a condition for retry, so checking status code might be a good idea.
+Retry limit can be a number of retries (e.g. `1 time` or `5 times`) or maximum elapsed duration in 
+[`time.Duration`](https://pkg.go.dev/time#ParseDuration) format (e.g. `5s` or `10m`).
+
+```gherkin
+    And I retry "some-service" HTTP request up to 120s
+    # And I retry "some-service" HTTP request up to 5 times
+    # And I retry "some-service" HTTP request up to 1 time
+
+```
+
 
 #### Response Expectations
 

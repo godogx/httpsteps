@@ -4,12 +4,13 @@ go 1.18
 
 require (
 	github.com/bool64/dev v0.2.27
-	github.com/bool64/httpmock v0.1.12
+	github.com/bool64/httpmock v0.1.13-0.20230525074459-c0438632075b
 	github.com/bool64/shared v0.1.5
+	github.com/cenkalti/backoff/v4 v4.2.1
 	github.com/cucumber/godog v0.12.6
 	github.com/godogx/resource v0.1.1
-	github.com/godogx/vars v0.1.5
-	github.com/stretchr/testify v1.8.2
+	github.com/godogx/vars v0.1.7
+	github.com/stretchr/testify v1.8.3
 	github.com/swaggest/assertjson v1.8.1
 )
 
