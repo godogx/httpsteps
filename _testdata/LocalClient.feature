@@ -95,6 +95,14 @@ Feature: HTTP Service
 
   Scenario: Successful call against named service
     When I request "some-service" HTTP endpoint with method "GET" and URI "/get-something?foo=bar"
+
+    # In case of flakyness or async operation you can use retries with exponential backoff to improve resiliency.
+    # Retry limit should be configured before any response expectations.
+    # Only first response expectation is used as a condition for retry, so checking status code might be a good idea.
+    And I retry "some-service" HTTP request up to 120s
+    # And I retry "some-service" HTTP request up to 5 times
+    # And I retry "some-service" HTTP request up to 1 time
+
     Then I should have "some-service" response with status "OK"
     And I should have "some-service" response with body
     """json

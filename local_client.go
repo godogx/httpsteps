@@ -16,9 +16,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bool64/httpmock"
 	"github.com/bool64/shared"
+	"github.com/cenkalti/backoff/v4"
 	"github.com/cucumber/godog"
 	"github.com/godogx/vars"
 	"github.com/swaggest/assertjson/json5"
@@ -184,6 +186,7 @@ func (l *LocalClient) RegisterSteps(s *godog.ScenarioContext) {
 	s.Step(`^I request(.*) HTTP endpoint with urlencoded form data$`, l.iRequestWithFormDataParameters)
 
 	s.Step(`^I follow redirects from(.*) HTTP endpoint$`, l.iFollowRedirects)
+	s.Step(`^I retry(.*) HTTP request up to (\d+ time[s]?|.*)$`, l.iRetry)
 	s.Step(`^I concurrently request idempotent(.*) HTTP endpoint$`, l.iRequestWithConcurrency)
 
 	s.Step(`^I request(.*) HTTP endpoint with attachment as field "([^"]*)" and file name "([^"]*)"$`, l.iRequestWithAttachment)
@@ -808,6 +811,44 @@ func (l *LocalClient) iFollowRedirects(ctx context.Context, service string) (con
 	}
 
 	c.FollowRedirects()
+
+	return ctx, nil
+}
+
+func (l *LocalClient) iRetry(ctx context.Context, service string, tries string) (context.Context, error) {
+	c, ctx, err := l.Service(ctx, service)
+	if err != nil {
+		return ctx, err
+	}
+
+	tries = strings.TrimSuffix(strings.TrimSuffix(tries, " times"), " time")
+	if maxTries, err := strconv.Atoi(tries); err == nil && maxTries > 0 {
+		eb := backoff.NewExponentialBackOff()
+
+		b := httpmock.RetryBackOffFunc(func() time.Duration {
+			maxTries--
+
+			if maxTries <= 0 {
+				return backoff.Stop
+			}
+
+			return eb.NextBackOff()
+		})
+
+		c.AllowRetries(b)
+
+		return ctx, nil
+	}
+
+	dur, err := time.ParseDuration(tries)
+	if err != nil {
+		return ctx, fmt.Errorf("parsing retry limit: %w", err)
+	}
+
+	eb := backoff.NewExponentialBackOff()
+	eb.MaxElapsedTime = dur
+
+	c.AllowRetries(eb)
 
 	return ctx, nil
 }
