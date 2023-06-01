@@ -60,7 +60,8 @@ type LocalClient struct {
 	// Deprecated: use VS.JSONComparer.Vars.
 	Vars *shared.Vars
 
-	VS *vars.Steps
+	VS           *vars.Steps
+	RetryBackOff func(ctx context.Context, maxElapsedTime time.Duration) (context.Context, httpmock.RetryBackOff)
 }
 
 // AddService registers a URL for named service.
@@ -815,6 +816,17 @@ func (l *LocalClient) iFollowRedirects(ctx context.Context, service string) (con
 	return ctx, nil
 }
 
+func (l *LocalClient) retrier(ctx context.Context, maxElapsed time.Duration) (context.Context, httpmock.RetryBackOff) {
+	if l.RetryBackOff != nil {
+		return l.RetryBackOff(ctx, maxElapsed)
+	}
+
+	eb := backoff.NewExponentialBackOff()
+	eb.MaxElapsedTime = maxElapsed
+
+	return ctx, eb
+}
+
 func (l *LocalClient) iRetry(ctx context.Context, service string, tries string) (context.Context, error) {
 	c, ctx, err := l.Service(ctx, service)
 	if err != nil {
@@ -823,8 +835,7 @@ func (l *LocalClient) iRetry(ctx context.Context, service string, tries string) 
 
 	tries = strings.TrimSuffix(strings.TrimSuffix(tries, " times"), " time")
 	if maxTries, err := strconv.Atoi(tries); err == nil && maxTries > 0 {
-		eb := backoff.NewExponentialBackOff()
-
+		ctx, eb := l.RetryBackOff(ctx, -1)
 		b := httpmock.RetryBackOffFunc(func() time.Duration {
 			maxTries--
 
@@ -845,8 +856,7 @@ func (l *LocalClient) iRetry(ctx context.Context, service string, tries string) 
 		return ctx, fmt.Errorf("parsing retry limit: %w", err)
 	}
 
-	eb := backoff.NewExponentialBackOff()
-	eb.MaxElapsedTime = dur
+	ctx, eb := l.retrier(ctx, dur)
 
 	c.AllowRetries(eb)
 

@@ -133,11 +133,14 @@ Or for a named service.
 And I concurrently request idempotent "some-service" HTTP endpoint
 ```
 
-In case of flakyness or async operation you can use retries with exponential backoff to improve resiliency.
+In case of flakyness or async operation you can use retries to improve resiliency.
 Retry limit should be configured before any response expectations.
 Only first response expectation is used as a condition for retry, so checking status code might be a good idea.
 Retry limit can be a number of retries (e.g. `1 time` or `5 times`) or maximum elapsed duration in 
 [`time.Duration`](https://pkg.go.dev/time#ParseDuration) format (e.g. `5s` or `10m`).
+
+By default, [exponential backoff](https://pkg.go.dev/github.com/cenkalti/backoff/v4#ExponentialBackOff) is used, 
+but it is possible to implement your own strategy with `(*LocalClient).RetryBackOff`.
 
 ```gherkin
     And I retry "some-service" HTTP request up to 120s
