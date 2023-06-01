@@ -1,0 +1,23 @@
+<html>
+<head>
+    <script src="parse_curl.js"></script>
+    <script>
+        function parseCurl() {
+            console.log(document.getElementById("curl").value);
+            var result = parse_curl(document.getElementById("curl").value);
+
+
+            console.log(result["url"], result["url"].indexOf('?'), result["url"].substring(result["url"].indexOf('?')))
+
+            const searchParams = new URLSearchParams(result["url"].substring(result["url"].indexOf('?')));
+
+            console.log(result)
+            console.log(searchParams)
+        }
+    </script>
+</head>
+<body>
+<textarea id="curl"></textarea>
+<button onclick="parseCurl();">Parse</button>
+</body>
+</html>

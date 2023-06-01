@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>GoDog CURL Translator</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            font-family: Arial, sans-serif;
+        }
+    </style>
+</head>
+<body>
+<h1>GoDog CURL Translator</h1>
+
+<textarea id="curlCommand" rows="4" cols="50">curl --location --request POST 'https://example.com' --header 'Content-Type: application/json'</textarea>
+<button onclick="translateCurlCommand()">Translate</button>
+
+<h2>Output:</h2>
+<pre id="output"></pre>
+
+<script>
+    function translateCurlCommand() {
+        const curlCommand = document.getElementById('curlCommand').value;
+
+        const reHeader = /--header '(.*?)'/g;
+        const reUrl = /'(http.*?)'/;
+        const reMethod = /--request (\w+)/;
+
+        const headersMatch = [...curlCommand.matchAll(reHeader)];
+        const urlMatch = curlCommand.match(reUrl);
+        const methodMatch = curlCommand.match(reMethod);
+
+        const headers = {};
+
+        headersMatch.forEach((header) => {
+            const headerParts = header[1].split(': ');
+            headers[headerParts[0]] = headerParts[1];
+        });
+
+        const fullUrl = urlMatch ? urlMatch[1] : undefined;
+        const url = fullUrl ? new URL(fullUrl).pathname : undefined;
+        const method = methodMatch ? methodMatch[1] : undefined;
+
+        let headerScenario = '      | Key | Value |\n';
+
+        for (const key in headers) {
+            headerScenario += `      | ${key} | ${headers[key]} |\n`;
+        }
+
+        const scenario = `Scenario: Your BDD Scenario Name
+  When I request "some-service" HTTP endpoint with method "${method}" and URI "${url}"
+  And I request "some-service" HTTP endpoint with headers
+${headerScenario}  Then I should have "some-service" response with status "200"
+  And I should have "some-service" response with body, that matches JSON
+  """
+  {
+    "id" : 1
+  }
+  """`;
+
+        document.getElementById('output').innerText = scenario;
+    }
+</script>
+</body>
+</html>
