@@ -140,7 +140,7 @@ Retry limit can be a number of retries (e.g. `1 time` or `5 times`) or maximum e
 [`time.Duration`](https://pkg.go.dev/time#ParseDuration) format (e.g. `5s` or `10m`).
 
 By default, [exponential backoff](https://pkg.go.dev/github.com/cenkalti/backoff/v4#ExponentialBackOff) is used, 
-but it is possible to implement your own strategy with `(*LocalClient).RetryBackOff` 
+but it is possible to implement your own strategy with `(*LocalClient).RetryBackOff`.
 
 ```gherkin
     And I retry "some-service" HTTP request up to 120s
