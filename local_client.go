@@ -824,6 +824,22 @@ func (l *LocalClient) retrier(ctx context.Context, maxElapsed time.Duration) (co
 	eb := backoff.NewExponentialBackOff()
 	eb.MaxElapsedTime = maxElapsed
 
+	if maxElapsed > 0 {
+		start := time.Now()
+
+		return ctx, httpmock.RetryBackOffFunc(func() time.Duration {
+			dur := eb.NextBackOff()
+			elapsed := time.Since(start)
+
+			// Hit the precise timeout as last retry.
+			if dur == -1 && elapsed < maxElapsed {
+				return maxElapsed - elapsed
+			}
+
+			return dur
+		})
+	}
+
 	return ctx, eb
 }
 
