@@ -2,6 +2,7 @@ package httpsteps_test
 
 import (
 	"bytes"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"sync"
@@ -79,14 +80,14 @@ func callServices(t *testing.T, someServiceURL, anotherServiceURL string) func()
 
 				// Hitting `"another-service" receives "POST" request "/post-something" with body`.
 				req, err := http.NewRequest(http.MethodPost, anotherServiceURL+"/post-something", bytes.NewReader([]byte(`{"foo":"bar"}`)))
-				require.NoError(t, err)
+				assert.NoError(t, err)
 
 				resp, err := http.DefaultTransport.RoundTrip(req)
-				require.NoError(t, err)
+				assert.NoError(t, err)
 
-				respBody, err := ioutil.ReadAll(resp.Body)
-				require.NoError(t, resp.Body.Close())
-				require.NoError(t, err)
+				respBody, err := io.ReadAll(resp.Body)
+				assert.NoError(t, resp.Body.Close())
+				assert.NoError(t, err)
 
 				assertjson.Equal(t, []byte(`{"theFooWas":"bar"}`), respBody)
 			}()

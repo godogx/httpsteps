@@ -492,7 +492,7 @@ func (l *LocalClient) iRequestWithAttachmentFromFile(ctx context.Context, servic
 	if err != nil {
 		return ctx, err
 	}
-	defer file.Close() //nolint: gosec, errcheck
+	defer file.Close() //nolint:errcheck
 
 	ctx, body, contentType, err := l.appendAttachmentFileIntoBody(ctx, file, fieldName, filepath.Base(filePath))
 	if err == nil {

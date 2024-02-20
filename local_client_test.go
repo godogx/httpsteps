@@ -13,12 +13,13 @@ import (
 	"github.com/cucumber/godog"
 	httpsteps "github.com/godogx/httpsteps"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestLocal_RegisterSteps(t *testing.T) {
 	mock, srvURL := httpmock.NewServer()
 	mock.OnError = func(err error) {
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	}
 
 	defer mock.Close()
@@ -49,7 +50,7 @@ func TestLocal_RegisterSteps(t *testing.T) {
 		t.Fatal("test failed")
 	}
 
-	assert.NoError(t, mock.ExpectationsWereMet())
+	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 func setExpectations(mock *httpmock.Server, concurrencyLevel int) {
@@ -147,7 +148,7 @@ func setExpectations(mock *httpmock.Server, concurrencyLevel int) {
 func TestLocal_RegisterSteps_unexpectedOtherResp(t *testing.T) {
 	mock, srvURL := httpmock.NewServer()
 	mock.OnError = func(err error) {
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	}
 
 	defer mock.Close()
@@ -192,7 +193,7 @@ func TestLocal_RegisterSteps_unexpectedOtherResp(t *testing.T) {
 	}
 
 	assert.Equal(t, 1, suite.Run())
-	assert.NoError(t, mock.ExpectationsWereMet())
+	require.NoError(t, mock.ExpectationsWereMet())
 	assert.Contains(t, out.String(), "Error: after scenario hook failed: no other responses expected for default: unexpected response status, expected: 204 (No Content), received: 404 (Not Found)")
 }
 
@@ -200,7 +201,7 @@ func TestLocal_RegisterSteps_dynamic(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/user" {
 			_, err := w.Write([]byte(`{"id":12345, "user":"bob", "name": "John Doe","created_at":"any","updated_at": "any"}`))
-			assert.NoError(t, err)
+			require.NoError(t, err)
 
 			return
 		}
@@ -209,17 +210,17 @@ func TestLocal_RegisterSteps_dynamic(t *testing.T) {
 			assert.Equal(t, "12345", r.Header.Get("X-UserId"))
 
 			cookie, err := r.Cookie("user_id")
-			assert.NoError(t, err)
+			require.NoError(t, err)
 			assert.Equal(t, "12345", cookie.Value)
 
-			b, err := ioutil.ReadAll(r.Body)
-			assert.NoError(t, err)
-			assert.NoError(t, r.Body.Close())
+			b, err := io.ReadAll(r.Body)
+			require.NoError(t, err)
+			require.NoError(t, r.Body.Close())
 
 			assert.Equal(t, `{"user_id":12345,"item_name":"Watermelon"}`, string(b))
 
 			_, err = w.Write([]byte(`{"id":54321,"created_at":"any","updated_at": "any","prefixed_user":"static_prefix::bob","prefixed_user_id":"static_prefix::12345","user_id":12345}`))
-			assert.NoError(t, err)
+			require.NoError(t, err)
 
 			return
 		}
@@ -248,7 +249,7 @@ func TestLocal_RegisterSteps_AttachmentFile(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/file-attached" {
 			// Maximum upload of 10 MB files
-			assert.NoError(t, r.ParseMultipartForm(10<<20))
+			require.NoError(t, r.ParseMultipartForm(10<<20))
 
 			// Get handler for filename, size and headers
 			file, _, err := r.FormFile("file")
@@ -259,7 +260,7 @@ func TestLocal_RegisterSteps_AttachmentFile(t *testing.T) {
 			}
 
 			defer func() {
-				assert.NoError(t, file.Close())
+				require.NoError(t, file.Close())
 			}()
 
 			const maxBufferSize = 1024 * 512
@@ -273,7 +274,7 @@ func TestLocal_RegisterSteps_AttachmentFile(t *testing.T) {
 			}
 
 			_, err = w.Write([]byte(`{"content":"` + string(content) + `"}`))
-			assert.NoError(t, err)
+			require.NoError(t, err)
 
 			return
 		}
@@ -301,7 +302,7 @@ func TestLocal_RegisterSteps_AttachmentFile(t *testing.T) {
 func TestLocal_RegisterSteps_followRedirects(t *testing.T) {
 	mock, srvURL := httpmock.NewServer()
 	mock.OnError = func(err error) {
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	}
 
 	defer mock.Close()
@@ -348,7 +349,7 @@ func TestLocal_RegisterSteps_followRedirects(t *testing.T) {
 func TestLocal_RegisterSteps_tableSetup(t *testing.T) {
 	mock, srvURL := httpmock.NewServer()
 	mock.OnError = func(err error) {
-		assert.NoError(t, err)
+		require.NoError(t, err)
 	}
 
 	defer mock.Close()
