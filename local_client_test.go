@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -207,7 +206,7 @@ func TestLocal_RegisterSteps_dynamic(t *testing.T) {
 		}
 
 		if r.URL.Path == "/order/12345/" && r.URL.Query().Get("user_id") == "12345" {
-			assert.Equal(t, "12345", r.Header.Get("X-UserId"))
+			assert.Equal(t, "12345", r.Header.Get("X-Userid"))
 
 			cookie, err := r.Cookie("user_id")
 			require.NoError(t, err)
@@ -266,7 +265,7 @@ func TestLocal_RegisterSteps_AttachmentFile(t *testing.T) {
 			const maxBufferSize = 1024 * 512
 			reader := io.LimitReader(file, maxBufferSize)
 
-			content, err := ioutil.ReadAll(reader)
+			content, err := io.ReadAll(reader)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 

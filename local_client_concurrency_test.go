@@ -1,6 +1,7 @@
 package httpsteps //nolint:testpackage // This test extends internal implementation for better control, so it has to be internal.
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
@@ -63,7 +64,18 @@ func TestLocalClient_RegisterSteps_concurrencyNonBlocked(t *testing.T) {
 
 	local := NewLocalClient(srvURL, func(client *httpmock.Client) {
 		client.ConcurrencyLevel = concurrency
+		client.Transport = http.DefaultTransport
 	})
+	local.Observe = func(ctx context.Context, r HTTPValue) context.Context {
+		if r.Sequence != 1 {
+			return ctx
+		}
+
+		return godog.Attach(ctx, godog.Attachment{
+			Body:      []byte(r.Request.URL.String()),
+			MediaType: "text/plain",
+		})
+	}
 	local.AddService("service-one", srvURL)
 	local.AddService("service-two", srvURL)
 

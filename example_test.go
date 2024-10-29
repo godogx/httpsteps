@@ -2,7 +2,7 @@ package httpsteps_test
 
 import (
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httptest"
 
@@ -17,7 +17,7 @@ func ExampleNewLocalClient() {
 	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		req, _ := http.NewRequest(http.MethodGet, templateService+"/template/hello", nil)
 		resp, _ := http.DefaultTransport.RoundTrip(req)
-		tpl, _ := ioutil.ReadAll(resp.Body)
+		tpl, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 
 		_, _ = w.Write([]byte(fmt.Sprintf(string(tpl), r.URL.Query().Get("name"))))
@@ -37,7 +37,7 @@ func ExampleNewLocalClient() {
 			Format: "pretty",
 			Strict: true,
 			Paths:  []string{"_testdata/Example.feature"},
-			Output: ioutil.Discard,
+			Output: io.Discard,
 		},
 	}
 
