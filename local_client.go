@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"moul.io/http2curl"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -24,6 +26,7 @@ import (
 	"github.com/cucumber/godog"
 	"github.com/godogx/vars"
 	"github.com/swaggest/assertjson/json5"
+	_ "moul.io/http2curl"
 )
 
 type sentinelError string
@@ -65,6 +68,9 @@ type LocalClient struct {
 
 	// Observe is called for every request that was made.
 	Observe func(ctx context.Context, r HTTPValue) context.Context
+
+	// ExposeHTTPDetails enables godog.Attachment for request and response data.
+	ExposeHTTPDetails bool
 }
 
 // HTTPValue grants access to a HTTP request and response.
@@ -624,8 +630,70 @@ func (l *LocalClient) expectResponse(ctx context.Context, service string, expect
 	}
 
 	err = expect(c)
+	if err != nil {
+		return ctx, err
+	}
 
-	return ctx, err
+	if l.ExposeHTTPDetails {
+		d := c.Details()
+
+		if d.Req != nil {
+			if s, ok := d.Req.Body.(io.Seeker); ok {
+				if _, err := s.Seek(0, io.SeekStart); err != nil {
+					return ctx, err
+				}
+			}
+
+			command, err := http2curl.GetCurlCommand(d.Req)
+			if err != nil {
+				return ctx, err
+			}
+
+			ctx = godog.Attach(ctx, godog.Attachment{
+				Body:      []byte(command.String()),
+				FileName:  "request as curl",
+				MediaType: "text/plain",
+			})
+		}
+
+		if d.Resp != nil {
+			d.Resp.Body = io.NopCloser(bytes.NewReader(d.RespBody))
+
+			resp, err := httputil.DumpResponse(d.Resp, true)
+			if err != nil {
+				return ctx, err
+			}
+
+			ctx = godog.Attach(ctx, godog.Attachment{
+				Body:      resp,
+				FileName:  "response",
+				MediaType: "text/plain",
+			})
+		}
+
+		if d.OtherResp != nil {
+			d.OtherResp.Body = io.NopCloser(bytes.NewReader(d.OtherRespBody))
+
+			resp, err := httputil.DumpResponse(d.Resp, true)
+			if err != nil {
+				return ctx, err
+			}
+
+			ctx = godog.Attach(ctx, godog.Attachment{
+				Body:      resp,
+				FileName:  "other responses",
+				MediaType: "text/plain",
+			})
+		}
+
+		if d.Attempt > 1 {
+			ctx = godog.Attach(ctx, godog.Attachment{
+				Body: []byte(fmt.Sprintf("Attempt: %d, Retry Delays: %v", d.Attempt, d.RetryDelays)),
+			})
+		}
+	}
+
+	return ctx, nil
 }
 
 func (l *LocalClient) iShouldHaveResponseWithStatus(ctx context.Context, service, statusOrCode string) (context.Context, error) {
