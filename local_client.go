@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
-	"moul.io/http2curl"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -17,7 +16,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/bool64/httpmock"
@@ -47,7 +45,8 @@ func NewLocalClient(defaultBaseURL string, options ...func(*httpmock.Client)) *L
 	defaultBaseURL = strings.TrimRight(defaultBaseURL, "/")
 
 	l := LocalClient{
-		options: options,
+		options:           options,
+		ExposeHTTPDetails: DefaultExposeHTTPDetails,
 	}
 
 	l.AddService(Default, defaultBaseURL)
@@ -66,11 +65,9 @@ type LocalClient struct {
 	VS           *vars.Steps
 	RetryBackOff func(ctx context.Context, maxElapsedTime time.Duration) (context.Context, httpmock.RetryBackOff)
 
-	// Observe is called for every request that was made.
-	Observe func(ctx context.Context, r HTTPValue) context.Context
-
 	// ExposeHTTPDetails enables godog.Attachment for request and response data.
-	ExposeHTTPDetails bool
+	// Has DefaultExposeHTTPDetails by default.
+	ExposeHTTPDetails func(ctx context.Context, d httpmock.HTTPValue) (context.Context, error)
 }
 
 // HTTPValue grants access to a HTTP request and response.
@@ -596,37 +593,74 @@ func (fn roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) 
 	return fn(req)
 }
 
-func (l *LocalClient) expectResponse(ctx context.Context, service string, expect func(c *httpmock.Client) error) (context.Context, error) {
-	c, ctx, err := l.Service(ctx, service)
+type httpMessageDumpedCtxKey struct{}
+
+// DefaultExposeHTTPDetails instruments context with godog.Attachment items of HTTP transaction.
+func DefaultExposeHTTPDetails(ctx context.Context, d httpmock.HTTPValue) (context.Context, error) {
+	d.Req.Body = io.NopCloser(bytes.NewReader(d.ReqBody))
+
+	if s, ok := d.Req.Body.(io.Seeker); ok {
+		if _, err := s.Seek(0, io.SeekStart); err != nil {
+			return ctx, err
+		}
+	}
+
+	req, err := httputil.DumpRequest(d.Req, true)
 	if err != nil {
 		return ctx, err
 	}
 
-	if l.Observe != nil {
-		tr := c.Transport
-		mu := sync.Mutex{}
-		i := 0
+	ctx = godog.Attach(ctx, godog.Attachment{
+		Body:      req,
+		FileName:  "request",
+		MediaType: "text/plain",
+	})
 
-		c.Transport = roundTripperFunc(func(request *http.Request) (*http.Response, error) {
-			resp, err := tr.RoundTrip(request)
+	if d.Resp != nil {
+		d.Resp.Body = io.NopCloser(bytes.NewReader(d.RespBody))
 
-			mu.Lock()
-			defer mu.Unlock()
+		resp, err := httputil.DumpResponse(d.Resp, true)
+		if err != nil {
+			return ctx, err
+		}
 
-			i++
-			ctx = l.Observe(ctx, HTTPValue{ //nolint:fatcontext
-				Sequence: i,
-				Request:  request,
-				Response: resp,
-				Error:    err,
-			})
-
-			return resp, err
+		ctx = godog.Attach(ctx, godog.Attachment{
+			Body:      resp,
+			FileName:  "response",
+			MediaType: "text/plain",
 		})
+	}
 
-		defer func() {
-			c.Transport = tr
-		}()
+	if d.OtherResp != nil {
+		d.OtherResp.Body = io.NopCloser(bytes.NewReader(d.OtherRespBody))
+
+		resp, err := httputil.DumpResponse(d.Resp, true)
+		if err != nil {
+			return ctx, err
+		}
+
+		ctx = godog.Attach(ctx, godog.Attachment{
+			Body:      resp,
+			FileName:  "other responses",
+			MediaType: "text/plain",
+		})
+	}
+
+	if d.Attempt > 1 {
+		ctx = godog.Attach(ctx, godog.Attachment{
+			FileName:  "retries",
+			Body:      []byte(fmt.Sprintf("Attempt: %d, Retry Delays: %v", d.Attempt, d.RetryDelays)),
+			MediaType: "text/plain",
+		})
+	}
+
+	return ctx, nil
+}
+
+func (l *LocalClient) expectResponse(ctx context.Context, service string, expect func(c *httpmock.Client) error) (context.Context, error) {
+	c, ctx, err := l.Service(ctx, service)
+	if err != nil {
+		return ctx, err
 	}
 
 	err = expect(c)
@@ -634,65 +668,12 @@ func (l *LocalClient) expectResponse(ctx context.Context, service string, expect
 		return ctx, err
 	}
 
-	if l.ExposeHTTPDetails {
-		d := c.Details()
+	d := c.Details()
 
-		if d.Req != nil {
-			if s, ok := d.Req.Body.(io.Seeker); ok {
-				if _, err := s.Seek(0, io.SeekStart); err != nil {
-					return ctx, err
-				}
-			}
+	if l.ExposeHTTPDetails != nil && d.Req != nil && d.Req.Context().Value(httpMessageDumpedCtxKey{}) == nil {
+		d.Req.WithContext(context.WithValue(d.Req.Context(), httpMessageDumpedCtxKey{}, true))
 
-			command, err := http2curl.GetCurlCommand(d.Req)
-			if err != nil {
-				return ctx, err
-			}
-
-			ctx = godog.Attach(ctx, godog.Attachment{
-				Body:      []byte(command.String()),
-				FileName:  "request as curl",
-				MediaType: "text/plain",
-			})
-		}
-
-		if d.Resp != nil {
-			d.Resp.Body = io.NopCloser(bytes.NewReader(d.RespBody))
-
-			resp, err := httputil.DumpResponse(d.Resp, true)
-			if err != nil {
-				return ctx, err
-			}
-
-			ctx = godog.Attach(ctx, godog.Attachment{
-				Body:      resp,
-				FileName:  "response",
-				MediaType: "text/plain",
-			})
-		}
-
-		if d.OtherResp != nil {
-			d.OtherResp.Body = io.NopCloser(bytes.NewReader(d.OtherRespBody))
-
-			resp, err := httputil.DumpResponse(d.Resp, true)
-			if err != nil {
-				return ctx, err
-			}
-
-			ctx = godog.Attach(ctx, godog.Attachment{
-				Body:      resp,
-				FileName:  "other responses",
-				MediaType: "text/plain",
-			})
-		}
-
-		if d.Attempt > 1 {
-			ctx = godog.Attach(ctx, godog.Attachment{
-				FileName:  "retries",
-				Body:      []byte(fmt.Sprintf("Attempt: %d, Retry Delays: %v", d.Attempt, d.RetryDelays)),
-				MediaType: "text/plain",
-			})
-		}
+		ctx, err = l.ExposeHTTPDetails(ctx, d)
 	}
 
 	return ctx, nil
