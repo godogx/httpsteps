@@ -634,7 +634,7 @@ func DefaultExposeHTTPDetails(ctx context.Context, d httpmock.HTTPValue) (contex
 	if d.OtherResp != nil {
 		d.OtherResp.Body = io.NopCloser(bytes.NewReader(d.OtherRespBody))
 
-		resp, err := httputil.DumpResponse(d.Resp, true)
+		resp, err := httputil.DumpResponse(d.OtherResp, true)
 		if err != nil {
 			return ctx, err
 		}
