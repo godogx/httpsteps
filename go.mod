@@ -7,7 +7,7 @@ require (
 	github.com/bool64/httpmock v0.1.15
 	github.com/bool64/shared v0.1.5
 	github.com/cenkalti/backoff/v4 v4.2.1
-	github.com/cucumber/godog v0.14.2-0.20241016144147-ecd2dfebbdab
+	github.com/cucumber/godog v0.15.0
 	github.com/godogx/resource v0.1.1
 	github.com/godogx/vars v0.1.8
 	github.com/stretchr/testify v1.9.0
