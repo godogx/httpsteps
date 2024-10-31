@@ -63,7 +63,9 @@ func TestLocalClient_RegisterSteps_concurrencyNonBlocked(t *testing.T) {
 
 	local := NewLocalClient(srvURL, func(client *httpmock.Client) {
 		client.ConcurrencyLevel = concurrency
+		client.Transport = http.DefaultTransport
 	})
+
 	local.AddService("service-one", srvURL)
 	local.AddService("service-two", srvURL)
 

@@ -3,14 +3,14 @@ module github.com/godogx/httpsteps
 go 1.18
 
 require (
-	github.com/bool64/dev v0.2.34
-	github.com/bool64/httpmock v0.1.13
+	github.com/bool64/dev v0.2.36
+	github.com/bool64/httpmock v0.1.15
 	github.com/bool64/shared v0.1.5
 	github.com/cenkalti/backoff/v4 v4.2.1
-	github.com/cucumber/godog v0.14.0
+	github.com/cucumber/godog v0.15.0
 	github.com/godogx/resource v0.1.1
-	github.com/godogx/vars v0.1.7
-	github.com/stretchr/testify v1.8.4
+	github.com/godogx/vars v0.1.8
+	github.com/stretchr/testify v1.9.0
 	github.com/swaggest/assertjson v1.9.0
 )
 

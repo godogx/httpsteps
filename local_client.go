@@ -7,9 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"mime/multipart"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -44,7 +44,8 @@ func NewLocalClient(defaultBaseURL string, options ...func(*httpmock.Client)) *L
 	defaultBaseURL = strings.TrimRight(defaultBaseURL, "/")
 
 	l := LocalClient{
-		options: options,
+		options:           options,
+		ExposeHTTPDetails: DefaultExposeHTTPDetails,
 	}
 
 	l.AddService(Default, defaultBaseURL)
@@ -62,6 +63,18 @@ type LocalClient struct {
 
 	VS           *vars.Steps
 	RetryBackOff func(ctx context.Context, maxElapsedTime time.Duration) (context.Context, httpmock.RetryBackOff)
+
+	// ExposeHTTPDetails enables godog.Attachment for request and response data.
+	// Has DefaultExposeHTTPDetails by default.
+	ExposeHTTPDetails func(ctx context.Context, d httpmock.HTTPValue) (context.Context, error)
+}
+
+// HTTPValue grants access to a HTTP request and response.
+type HTTPValue struct {
+	Sequence int
+	Request  *http.Request
+	Response *http.Response
+	Error    error
 }
 
 // AddService registers a URL for named service.
@@ -215,12 +228,8 @@ func (l *LocalClient) RegisterSteps(s *godog.ScenarioContext) {
 	s.After(l.afterScenario)
 }
 
-func (l *LocalClient) afterScenario(ctx context.Context, _ *godog.Scenario, err error) (context.Context, error) {
+func (l *LocalClient) afterScenario(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
 	var errs []string
-
-	if err != nil {
-		errs = append(errs, err.Error())
-	}
 
 	for service := range l.services {
 		client, _, err := l.Service(ctx, service)
@@ -270,7 +279,7 @@ func (l *LocalClient) iRequestWithMethodAndURI(ctx context.Context, service, met
 //
 // Deprecated: use github.com/godogx/vars.(*Steps).ReplaceFile.
 func LoadBodyFromFile(filePath string, vars *shared.Vars) ([]byte, error) {
-	body, err := ioutil.ReadFile(filePath) //nolint // File inclusion via variable during tests.
+	body, err := os.ReadFile(filePath) //nolint // File inclusion via variable during tests.
 	if err != nil {
 		return nil, err
 	}
@@ -401,9 +410,11 @@ func (l *LocalClient) tableSetup(
 
 	var rv []byte
 
+	ctx = l.VS.PrepareContext(ctx)
+
 	for key, values := range m {
 		for _, value := range values {
-			ctx, rv, err = l.VS.Replace(ctx, []byte(value))
+			_, rv, err = l.VS.Replace(ctx, []byte(value))
 			if err != nil {
 				return ctx, fmt.Errorf("failed to replace vars in %s %s: %w", receiverName, key, err)
 			}
@@ -571,238 +582,260 @@ func (l *LocalClient) iShouldHaveOtherResponsesWithStatus(ctx context.Context, s
 	return ctx, c.ExpectOtherResponsesStatus(code)
 }
 
-func (l *LocalClient) iShouldHaveResponseWithStatus(ctx context.Context, service, statusOrCode string) (context.Context, error) {
+// DefaultExposeHTTPDetails instruments context with godog.Attachment items of HTTP transaction.
+func DefaultExposeHTTPDetails(ctx context.Context, d httpmock.HTTPValue) (context.Context, error) {
+	d.Req.Body = io.NopCloser(bytes.NewReader(d.ReqBody))
+
+	if s, ok := d.Req.Body.(io.Seeker); ok {
+		if _, err := s.Seek(0, io.SeekStart); err != nil {
+			return ctx, err
+		}
+	}
+
+	req, err := httputil.DumpRequest(d.Req, true)
+	if err != nil {
+		return ctx, err
+	}
+
+	ctx = godog.Attach(ctx, godog.Attachment{
+		Body:      req,
+		FileName:  "request",
+		MediaType: "text/plain",
+	})
+
+	if d.Resp != nil {
+		d.Resp.Body = io.NopCloser(bytes.NewReader(d.RespBody))
+
+		resp, err := httputil.DumpResponse(d.Resp, true)
+		if err != nil {
+			return ctx, err
+		}
+
+		ctx = godog.Attach(ctx, godog.Attachment{
+			Body:      resp,
+			FileName:  "response",
+			MediaType: "text/plain",
+		})
+	}
+
+	if d.OtherResp != nil {
+		d.OtherResp.Body = io.NopCloser(bytes.NewReader(d.OtherRespBody))
+
+		resp, err := httputil.DumpResponse(d.OtherResp, true)
+		if err != nil {
+			return ctx, err
+		}
+
+		ctx = godog.Attach(ctx, godog.Attachment{
+			Body:      resp,
+			FileName:  "other responses",
+			MediaType: "text/plain",
+		})
+	}
+
+	if d.Attempt > 1 {
+		ctx = godog.Attach(ctx, godog.Attachment{
+			FileName:  "retries",
+			Body:      []byte(fmt.Sprintf("Attempt: %d, Retry Delays: %v", d.Attempt, d.RetryDelays)),
+			MediaType: "text/plain",
+		})
+	}
+
+	return ctx, nil
+}
+
+func (l *LocalClient) expectResponse(ctx context.Context, service string, expect func(c *httpmock.Client) error) (context.Context, error) {
 	c, ctx, err := l.Service(ctx, service)
 	if err != nil {
 		return ctx, err
 	}
 
-	code, err := statusCode(statusOrCode)
-	if err != nil {
-		return ctx, err
+	expErr := expect(c)
+
+	d := c.Details()
+
+	if l.ExposeHTTPDetails != nil && d.Req != nil && !d.AlreadyRequested {
+		ctx, err = l.ExposeHTTPDetails(ctx, d)
 	}
 
-	return ctx, c.ExpectResponseStatus(code)
+	if expErr != nil {
+		if err == nil {
+			err = expErr
+		} else {
+			err = fmt.Errorf("%w (%s)", expErr, err.Error())
+		}
+	}
+
+	return ctx, err
+}
+
+func (l *LocalClient) iShouldHaveResponseWithStatus(ctx context.Context, service, statusOrCode string) (context.Context, error) {
+	return l.expectResponse(ctx, service, func(c *httpmock.Client) error {
+		code, err := statusCode(statusOrCode)
+		if err != nil {
+			return err
+		}
+
+		return c.ExpectResponseStatus(code)
+	})
 }
 
 func (l *LocalClient) iShouldHaveOtherResponsesWithHeader(ctx context.Context, service, key, value string) (context.Context, error) {
-	c, ctx, err := l.Service(ctx, service)
-	if err != nil {
-		return ctx, err
-	}
-
-	return ctx, c.ExpectOtherResponsesHeader(key, value)
+	return l.expectResponse(ctx, service, func(c *httpmock.Client) error {
+		return c.ExpectOtherResponsesHeader(key, value)
+	})
 }
 
 func (l *LocalClient) iShouldHaveOtherResponsesWithHeaders(ctx context.Context, service string, data *godog.Table) (context.Context, error) {
-	c, ctx, err := l.Service(ctx, service)
-	if err != nil {
-		return ctx, err
-	}
+	return l.expectResponse(ctx, service, func(c *httpmock.Client) error {
+		m, err := mapOfData(data)
+		if err != nil {
+			return err
+		}
 
-	m, err := mapOfData(data)
-	if err != nil {
-		return ctx, err
-	}
-
-	for key, values := range m {
-		for _, value := range values {
-			if err := c.ExpectOtherResponsesHeader(key, value); err != nil {
-				return ctx, fmt.Errorf("failed to assert response header %s: %w", key, err)
+		for key, values := range m {
+			for _, value := range values {
+				if err := c.ExpectOtherResponsesHeader(key, value); err != nil {
+					return fmt.Errorf("failed to assert response header %s: %w", key, err)
+				}
 			}
 		}
-	}
 
-	return ctx, nil
+		return nil
+	})
 }
 
 func (l *LocalClient) iShouldHaveResponseWithHeader(ctx context.Context, service, key, value string) (context.Context, error) {
-	c, ctx, err := l.Service(ctx, service)
-	if err != nil {
-		return ctx, err
-	}
-
-	return ctx, c.ExpectResponseHeader(key, value)
+	return l.expectResponse(ctx, service, func(c *httpmock.Client) error {
+		return c.ExpectResponseHeader(key, value)
+	})
 }
 
 func (l *LocalClient) iShouldHaveResponseWithHeaders(ctx context.Context, service string, data *godog.Table) (context.Context, error) {
-	c, ctx, err := l.Service(ctx, service)
-	if err != nil {
-		return ctx, err
-	}
+	return l.expectResponse(ctx, service, func(c *httpmock.Client) error {
+		m, err := mapOfData(data)
+		if err != nil {
+			return err
+		}
 
-	m, err := mapOfData(data)
-	if err != nil {
-		return ctx, err
-	}
-
-	for key, values := range m {
-		for _, value := range values {
-			if err := c.ExpectResponseHeader(key, value); err != nil {
-				return ctx, fmt.Errorf("failed to assert response header %s: %w", key, err)
+		for key, values := range m {
+			for _, value := range values {
+				if err := c.ExpectResponseHeader(key, value); err != nil {
+					return fmt.Errorf("failed to assert response header %s: %w", key, err)
+				}
 			}
 		}
-	}
 
-	return ctx, nil
+		return nil
+	})
 }
 
 func (l *LocalClient) iShouldHaveResponseWithBody(ctx context.Context, service, bodyDoc string) (context.Context, error) {
-	c, ctx, err := l.Service(ctx, service)
-	if err != nil {
-		return ctx, err
-	}
+	ctx = l.VS.PrepareContext(ctx)
 
-	err = c.ExpectResponseBodyCallback(func(received []byte) error {
-		ctx, err = augmentBodyErr(l.VS.Assert(ctx, []byte(bodyDoc), received, false))
-
-		return err
+	return l.expectResponse(ctx, service, func(c *httpmock.Client) error {
+		return c.ExpectResponseBodyCallback(func(received []byte) error {
+			return augmentBodyErr(l.VS.Assert(ctx, []byte(bodyDoc), received, false))
+		})
 	})
-
-	return ctx, err
 }
 
 func (l *LocalClient) iShouldHaveResponseWithBodyFromFile(ctx context.Context, service, filePath string) (context.Context, error) {
-	c, ctx, err := l.Service(ctx, service)
-	if err != nil {
-		return ctx, err
-	}
+	ctx = l.VS.PrepareContext(ctx)
 
-	err = c.ExpectResponseBodyCallback(func(received []byte) error {
-		ctx, err = augmentBodyErr(l.VS.AssertFile(ctx, filePath, received, false))
-
-		return err
+	return l.expectResponse(ctx, service, func(c *httpmock.Client) error {
+		return c.ExpectResponseBodyCallback(func(received []byte) error {
+			return augmentBodyErr(l.VS.AssertFile(ctx, filePath, received, false))
+		})
 	})
-
-	return ctx, err
 }
 
 func (l *LocalClient) iShouldHaveResponseWithBodyThatMatchesJSON(ctx context.Context, service, bodyDoc string) (context.Context, error) {
-	c, ctx, err := l.Service(ctx, service)
-	if err != nil {
-		return ctx, err
-	}
+	ctx = l.VS.PrepareContext(ctx)
 
-	err = c.ExpectResponseBodyCallback(func(received []byte) error {
-		ctx, err = augmentBodyErr(l.VS.Assert(ctx, []byte(bodyDoc), received, true))
-
-		return err
+	return l.expectResponse(ctx, service, func(c *httpmock.Client) error {
+		return c.ExpectResponseBodyCallback(func(received []byte) error {
+			return augmentBodyErr(l.VS.Assert(ctx, []byte(bodyDoc), received, true))
+		})
 	})
-
-	return ctx, err
 }
 
-func augmentBodyErr(ctx context.Context, err error) (context.Context, error) {
+func augmentBodyErr(_ context.Context, err error) error {
 	if err != nil {
-		return ctx, fmt.Errorf("%w %s", errUnexpectedBody, err.Error())
+		return fmt.Errorf("%w %s", errUnexpectedBody, err.Error())
 	}
 
-	return ctx, nil
+	return nil
 }
 
 func (l *LocalClient) iShouldHaveResponseWithBodyThatMatchesJSONPaths(ctx context.Context, service string, jsonPaths *godog.Table) (context.Context, error) {
-	c, ctx, err := l.Service(ctx, service)
-	if err != nil {
-		return ctx, err
-	}
+	ctx = l.VS.PrepareContext(ctx)
 
-	err = c.ExpectResponseBodyCallback(func(received []byte) error {
-		ctx, err = augmentBodyErr(l.VS.AssertJSONPaths(ctx, jsonPaths, received, true))
-
-		return err
+	return l.expectResponse(ctx, service, func(c *httpmock.Client) error {
+		return c.ExpectResponseBodyCallback(func(received []byte) error {
+			return augmentBodyErr(l.VS.AssertJSONPaths(ctx, jsonPaths, received, true))
+		})
 	})
-
-	return ctx, err
 }
 
 func (l *LocalClient) iShouldHaveResponseWithBodyThatMatchesJSONFromFile(ctx context.Context, service, filePath string) (context.Context, error) {
-	c, ctx, err := l.Service(ctx, service)
-	if err != nil {
-		return ctx, err
-	}
+	ctx = l.VS.PrepareContext(ctx)
 
-	err = c.ExpectResponseBodyCallback(func(received []byte) error {
-		ctx, err = augmentBodyErr(l.VS.AssertFile(ctx, filePath, received, true))
-
-		return err
+	return l.expectResponse(ctx, service, func(c *httpmock.Client) error {
+		return c.ExpectResponseBodyCallback(func(received []byte) error {
+			return augmentBodyErr(l.VS.AssertFile(ctx, filePath, received, true))
+		})
 	})
-
-	return ctx, err
 }
 
 func (l *LocalClient) iShouldHaveOtherResponsesWithBody(ctx context.Context, service, bodyDoc string) (context.Context, error) {
-	c, ctx, err := l.Service(ctx, service)
-	if err != nil {
-		return ctx, err
-	}
+	ctx = l.VS.PrepareContext(ctx)
 
-	err = c.ExpectOtherResponsesBodyCallback(func(received []byte) error {
-		ctx, err = augmentBodyErr(l.VS.Assert(ctx, []byte(bodyDoc), received, false))
-
-		return err
+	return l.expectResponse(ctx, service, func(c *httpmock.Client) error {
+		return c.ExpectOtherResponsesBodyCallback(func(received []byte) error {
+			return augmentBodyErr(l.VS.Assert(ctx, []byte(bodyDoc), received, false))
+		})
 	})
-
-	return ctx, err
 }
 
 func (l *LocalClient) iShouldHaveOtherResponsesWithBodyFromFile(ctx context.Context, service, filePath string) (context.Context, error) {
-	c, ctx, err := l.Service(ctx, service)
-	if err != nil {
-		return ctx, err
-	}
+	ctx = l.VS.PrepareContext(ctx)
 
-	err = c.ExpectOtherResponsesBodyCallback(func(received []byte) error {
-		ctx, err = augmentBodyErr(l.VS.AssertFile(ctx, filePath, received, false))
-
-		return err
+	return l.expectResponse(ctx, service, func(c *httpmock.Client) error {
+		return c.ExpectOtherResponsesBodyCallback(func(received []byte) error {
+			return augmentBodyErr(l.VS.AssertFile(ctx, filePath, received, false))
+		})
 	})
-
-	return ctx, err
 }
 
 func (l *LocalClient) iShouldHaveOtherResponsesWithBodyThatMatchesJSON(ctx context.Context, service, bodyDoc string) (context.Context, error) {
-	c, ctx, err := l.Service(ctx, service)
-	if err != nil {
-		return ctx, err
-	}
+	ctx = l.VS.PrepareContext(ctx)
 
-	err = c.ExpectOtherResponsesBodyCallback(func(received []byte) error {
-		ctx, err = augmentBodyErr(l.VS.Assert(ctx, []byte(bodyDoc), received, true))
-
-		return err
+	return l.expectResponse(ctx, service, func(c *httpmock.Client) error {
+		return c.ExpectOtherResponsesBodyCallback(func(received []byte) error {
+			return augmentBodyErr(l.VS.Assert(ctx, []byte(bodyDoc), received, true))
+		})
 	})
-
-	return ctx, err
 }
 
 func (l *LocalClient) iShouldHaveOtherResponsesWithBodyThatMatchesJSONPaths(ctx context.Context, service string, jsonPaths *godog.Table) (context.Context, error) {
-	c, ctx, err := l.Service(ctx, service)
-	if err != nil {
-		return ctx, err
-	}
+	ctx = l.VS.PrepareContext(ctx)
 
-	err = c.ExpectOtherResponsesBodyCallback(func(received []byte) error {
-		ctx, err = augmentBodyErr(l.VS.AssertJSONPaths(ctx, jsonPaths, received, true))
-
-		return err
+	return l.expectResponse(ctx, service, func(c *httpmock.Client) error {
+		return c.ExpectOtherResponsesBodyCallback(func(received []byte) error {
+			return augmentBodyErr(l.VS.AssertJSONPaths(ctx, jsonPaths, received, true))
+		})
 	})
-
-	return ctx, err
 }
 
 func (l *LocalClient) iShouldHaveOtherResponsesWithBodyThatMatchesJSONFromFile(ctx context.Context, service, filePath string) (context.Context, error) {
-	c, ctx, err := l.Service(ctx, service)
-	if err != nil {
-		return ctx, err
-	}
+	ctx = l.VS.PrepareContext(ctx)
 
-	err = c.ExpectOtherResponsesBodyCallback(func(received []byte) error {
-		ctx, err = augmentBodyErr(l.VS.AssertFile(ctx, filePath, received, false))
-
-		return err
+	return l.expectResponse(ctx, service, func(c *httpmock.Client) error {
+		return c.ExpectOtherResponsesBodyCallback(func(received []byte) error {
+			return augmentBodyErr(l.VS.AssertFile(ctx, filePath, received, false))
+		})
 	})
-
-	return ctx, err
 }
 
 func (l *LocalClient) iFollowRedirects(ctx context.Context, service string) (context.Context, error) {

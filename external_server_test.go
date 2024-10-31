@@ -3,7 +3,6 @@ package httpsteps_test
 import (
 	"bytes"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"sync"
 	"testing"
@@ -65,7 +64,7 @@ func callServices(t *testing.T, someServiceURL, anotherServiceURL string) func()
 
 		assert.Equal(t, "foo", resp.Header.Get("X-Bar"))
 
-		respBody, err := ioutil.ReadAll(resp.Body)
+		respBody, err := io.ReadAll(resp.Body)
 		require.NoError(t, resp.Body.Close())
 		require.NoError(t, err)
 
@@ -92,6 +91,7 @@ func callServices(t *testing.T, someServiceURL, anotherServiceURL string) func()
 				assertjson.Equal(t, []byte(`{"theFooWas":"bar"}`), respBody)
 			}()
 		}
+
 		wg.Wait()
 
 		// Hitting `"some-service" responds with status "OK"`.
@@ -101,7 +101,7 @@ func callServices(t *testing.T, someServiceURL, anotherServiceURL string) func()
 		resp, err = http.DefaultTransport.RoundTrip(req)
 		require.NoError(t, err)
 
-		respBody, err = ioutil.ReadAll(resp.Body)
+		respBody, err = io.ReadAll(resp.Body)
 		require.NoError(t, resp.Body.Close())
 		require.NoError(t, err)
 		require.Empty(t, respBody)
@@ -113,7 +113,7 @@ func callServices(t *testing.T, someServiceURL, anotherServiceURL string) func()
 		resp, err = http.DefaultTransport.RoundTrip(req)
 		require.NoError(t, err)
 
-		respBody, err = ioutil.ReadAll(resp.Body)
+		respBody, err = io.ReadAll(resp.Body)
 		require.NoError(t, resp.Body.Close())
 		require.NoError(t, err)
 
