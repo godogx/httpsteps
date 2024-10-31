@@ -688,7 +688,9 @@ func (l *LocalClient) expectResponse(ctx context.Context, service string, expect
 
 		if d.Attempt > 1 {
 			ctx = godog.Attach(ctx, godog.Attachment{
-				Body: []byte(fmt.Sprintf("Attempt: %d, Retry Delays: %v", d.Attempt, d.RetryDelays)),
+				FileName:  "retries",
+				Body:      []byte(fmt.Sprintf("Attempt: %d, Retry Delays: %v", d.Attempt, d.RetryDelays)),
+				MediaType: "text/plain",
 			})
 		}
 	}
