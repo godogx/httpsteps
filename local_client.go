@@ -24,7 +24,6 @@ import (
 	"github.com/cucumber/godog"
 	"github.com/godogx/vars"
 	"github.com/swaggest/assertjson/json5"
-	_ "moul.io/http2curl"
 )
 
 type sentinelError string
@@ -229,12 +228,8 @@ func (l *LocalClient) RegisterSteps(s *godog.ScenarioContext) {
 	s.After(l.afterScenario)
 }
 
-func (l *LocalClient) afterScenario(ctx context.Context, _ *godog.Scenario, err error) (context.Context, error) {
+func (l *LocalClient) afterScenario(ctx context.Context, _ *godog.Scenario, _ error) (context.Context, error) {
 	var errs []string
-
-	if err != nil {
-		errs = append(errs, err.Error())
-	}
 
 	for service := range l.services {
 		client, _, err := l.Service(ctx, service)
@@ -587,14 +582,6 @@ func (l *LocalClient) iShouldHaveOtherResponsesWithStatus(ctx context.Context, s
 	return ctx, c.ExpectOtherResponsesStatus(code)
 }
 
-type roundTripperFunc func(*http.Request) (*http.Response, error)
-
-func (fn roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
-	return fn(req)
-}
-
-type httpMessageDumpedCtxKey struct{}
-
 // DefaultExposeHTTPDetails instruments context with godog.Attachment items of HTTP transaction.
 func DefaultExposeHTTPDetails(ctx context.Context, d httpmock.HTTPValue) (context.Context, error) {
 	d.Req.Body = io.NopCloser(bytes.NewReader(d.ReqBody))
@@ -663,20 +650,23 @@ func (l *LocalClient) expectResponse(ctx context.Context, service string, expect
 		return ctx, err
 	}
 
-	err = expect(c)
-	if err != nil {
-		return ctx, err
-	}
+	expErr := expect(c)
 
 	d := c.Details()
 
-	if l.ExposeHTTPDetails != nil && d.Req != nil && d.Req.Context().Value(httpMessageDumpedCtxKey{}) == nil {
-		d.Req.WithContext(context.WithValue(d.Req.Context(), httpMessageDumpedCtxKey{}, true))
-
+	if l.ExposeHTTPDetails != nil && d.Req != nil && !d.AlreadyRequested {
 		ctx, err = l.ExposeHTTPDetails(ctx, d)
 	}
 
-	return ctx, nil
+	if expErr != nil {
+		if err == nil {
+			err = expErr
+		} else {
+			err = fmt.Errorf("%w (%s)", expErr, err.Error())
+		}
+	}
+
+	return ctx, err
 }
 
 func (l *LocalClient) iShouldHaveResponseWithStatus(ctx context.Context, service, statusOrCode string) (context.Context, error) {
