@@ -19,6 +19,10 @@ Feature: Dynamic data is used in steps
      "created_at":"<ignore-diff>","updated_at": "<ignore-diff>"
     }
     """
+    And I should have response with body, that contains 
+    """
+    "id":"$user_id"
+    """
 
     # Creating an order for that user with $user_id.
     When I request HTTP endpoint with method "POST" and URI "/order/$user_id/?user_id=$user_id"

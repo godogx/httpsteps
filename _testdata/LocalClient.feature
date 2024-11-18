@@ -128,4 +128,9 @@ Feature: HTTP Service
     """
     And I should have "some-service" response with header "Content-Type: application/json"
 
+    And I should have "some-service" response with body, that contains
+    """
+    some
+    """
+
 

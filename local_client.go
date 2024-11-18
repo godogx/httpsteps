@@ -212,6 +212,7 @@ func (l *LocalClient) RegisterSteps(s *godog.ScenarioContext) {
 
 	s.Step(`^I should have(.*) response with body from file$`, l.iShouldHaveResponseWithBodyFromFile)
 	s.Step(`^I should have(.*) response with body$`, l.iShouldHaveResponseWithBody)
+	s.Step(`^I should have(.*) response with body, that contains$`, l.iShouldHaveResponseWithBodyThatContains)
 	s.Step(`^I should have(.*) response with body, that matches JSON from file$`, l.iShouldHaveResponseWithBodyThatMatchesJSONFromFile)
 	s.Step(`^I should have(.*) response with body, that matches JSON$`, l.iShouldHaveResponseWithBodyThatMatchesJSON)
 	s.Step(`^I should have(.*) response with body, that matches JSON paths$`, l.iShouldHaveResponseWithBodyThatMatchesJSONPaths)
@@ -553,6 +554,7 @@ const (
 	errUnexpectedExpectations = sentinelError("unexpected existing expectations")
 	errInvalidNumberOfColumns = sentinelError("invalid number of columns")
 	errUnexpectedBody         = sentinelError("unexpected body")
+	errDoesNotContain         = sentinelError("does not contain")
 )
 
 func statusCode(statusOrCode string) (int, error) {
@@ -736,6 +738,26 @@ func (l *LocalClient) iShouldHaveResponseWithBody(ctx context.Context, service, 
 	return l.expectResponse(ctx, service, func(c *httpmock.Client) error {
 		return c.ExpectResponseBodyCallback(func(received []byte) error {
 			return augmentBodyErr(l.VS.Assert(ctx, []byte(bodyDoc), received, false))
+		})
+	})
+}
+
+func (l *LocalClient) iShouldHaveResponseWithBodyThatContains(ctx context.Context, service, bodyDoc string) (context.Context, error) {
+	ctx = l.VS.PrepareContext(ctx)
+
+	return l.expectResponse(ctx, service, func(c *httpmock.Client) error {
+		return c.ExpectResponseBodyCallback(func(received []byte) error {
+			ctx, rv, err := l.VS.Replace(ctx, []byte(bodyDoc))
+			if err != nil {
+				return err
+			}
+
+			s, substr := string(received), string(rv)
+			if !strings.Contains(s, substr) {
+				return augmentBodyErr(ctx, fmt.Errorf("%w %q in %q", errDoesNotContain, substr, s))
+			}
+
+			return nil
 		})
 	})
 }
