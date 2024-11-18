@@ -63,6 +63,10 @@ Feature: HTTP Service
     And I should have other responses with body, that matches JSON paths
       | $.status | "failed" |
       | $.error  | "foo"    |
+    And I should have other responses with body, that contains
+    """
+    "status":"failed"
+    """
 
     And I should have other responses with header "Content-Type: application/json"
 

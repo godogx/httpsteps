@@ -221,6 +221,7 @@ func (l *LocalClient) RegisterSteps(s *godog.ScenarioContext) {
 	s.Step(`^I should have(.*) other responses with header "([^"]*): ([^"]*)"$`, l.iShouldHaveOtherResponsesWithHeader)
 	s.Step(`^I should have(.*) other responses with headers$`, l.iShouldHaveOtherResponsesWithHeaders)
 	s.Step(`^I should have(.*) other responses with body$`, l.iShouldHaveOtherResponsesWithBody)
+	s.Step(`^I should have(.*) other responses with body, that contains$`, l.iShouldHaveOtherResponsesWithBodyThatContains)
 	s.Step(`^I should have(.*) other responses with body from file$`, l.iShouldHaveOtherResponsesWithBodyFromFile)
 	s.Step(`^I should have(.*) other responses with body, that matches JSON$`, l.iShouldHaveOtherResponsesWithBodyThatMatchesJSON)
 	s.Step(`^I should have(.*) other responses with body, that matches JSON from file$`, l.iShouldHaveOtherResponsesWithBodyThatMatchesJSONFromFile)
@@ -742,22 +743,36 @@ func (l *LocalClient) iShouldHaveResponseWithBody(ctx context.Context, service, 
 	})
 }
 
+func (l *LocalClient) contains(ctx context.Context, received []byte, bodyDoc string) error {
+	ctx, rv, err := l.VS.Replace(ctx, []byte(bodyDoc))
+	if err != nil {
+		return err
+	}
+
+	s, substr := string(received), string(rv)
+	if !strings.Contains(s, substr) {
+		return augmentBodyErr(ctx, fmt.Errorf("%w %q in %q", errDoesNotContain, substr, s))
+	}
+
+	return nil
+}
+
 func (l *LocalClient) iShouldHaveResponseWithBodyThatContains(ctx context.Context, service, bodyDoc string) (context.Context, error) {
 	ctx = l.VS.PrepareContext(ctx)
 
 	return l.expectResponse(ctx, service, func(c *httpmock.Client) error {
 		return c.ExpectResponseBodyCallback(func(received []byte) error {
-			ctx, rv, err := l.VS.Replace(ctx, []byte(bodyDoc))
-			if err != nil {
-				return err
-			}
+			return l.contains(ctx, received, bodyDoc)
+		})
+	})
+}
 
-			s, substr := string(received), string(rv)
-			if !strings.Contains(s, substr) {
-				return augmentBodyErr(ctx, fmt.Errorf("%w %q in %q", errDoesNotContain, substr, s))
-			}
+func (l *LocalClient) iShouldHaveOtherResponsesWithBodyThatContains(ctx context.Context, service, bodyDoc string) (context.Context, error) {
+	ctx = l.VS.PrepareContext(ctx)
 
-			return nil
+	return l.expectResponse(ctx, service, func(c *httpmock.Client) error {
+		return c.ExpectOtherResponsesBodyCallback(func(received []byte) error {
+			return l.contains(ctx, received, bodyDoc)
 		})
 	})
 }
