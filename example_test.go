@@ -20,7 +20,7 @@ func ExampleNewLocalClient() {
 		tpl, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 
-		_, _ = w.Write([]byte(fmt.Sprintf(string(tpl), r.URL.Query().Get("name"))))
+		_, _ = fmt.Fprintf(w, string(tpl), r.URL.Query().Get("name"))
 	})
 
 	srv := httptest.NewServer(h)

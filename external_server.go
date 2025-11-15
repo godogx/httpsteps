@@ -14,6 +14,7 @@ import (
 
 type exp struct {
 	httpmock.Expectation
+
 	async bool
 }
 
