@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -25,16 +26,16 @@ func main() {
 		offset = 1
 	}
 
-	req, err := ParseCurl(os.Args[offset:])
+	req, err := parseCurl(os.Args[offset:])
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	host := /*req.URL.Scheme + "://" + */ req.URL.Hostname()
+	baseURL := req.URL.Scheme + "://" + req.URL.Hostname()
 	method := req.Method
 	path := req.URL.Path
 	if serviceName == "" {
-		serviceName = host
+		serviceName = baseURL
 	}
 
 	fmt.Printf("    When I request %q HTTP endpoint with method %q and URI %q\n", serviceName, method, path)
@@ -48,6 +49,29 @@ func main() {
 	if len(query) > 0 {
 		fmt.Printf("    And I request %q HTTP endpoint with query parameters\n", serviceName)
 		printTable(query)
+	}
+
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if len(body) > 0 {
+		if req.Header.Get("Content-Type") == "application/x-www-form-urlencoded" {
+			form, err := url.ParseQuery(string(body))
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			fmt.Printf("    And I request %q HTTP endpoint with urlencoded form data\n", serviceName)
+			printTable(form)
+		}
+
+		if req.Header.Get("Content-Type") == "application/json" {
+			fmt.Printf("    And I request %q HTTP endpoint with body\n", serviceName)
+			fmt.Printf(fmt.Sprintf("    ```json\n    %s\n    ```\n", string(body)))
+		}
+
 	}
 }
 
@@ -67,12 +91,15 @@ func printTable(t map[string][]string) {
 	}
 }
 
-// ParseCurl takes a raw curl command and converts it into an *http.Request.
-func ParseCurl(tokens []string) (*http.Request, error) {
-	method := "GET"
-	var rawURL string
-	var body []byte
-	headers := http.Header{}
+// parseCurl takes a raw curl command and converts it into an *http.Request.
+func parseCurl(tokens []string) (*http.Request, error) {
+	var (
+		method          = http.MethodGet
+		rawURL          string
+		body            []byte
+		headers         = http.Header{}
+		contentTypeHint = ""
+	)
 
 	// Iterate over tokens and extract important parts.
 	for i := 0; i < len(tokens); i++ {
@@ -98,8 +125,11 @@ func ParseCurl(tokens []string) (*http.Request, error) {
 		case "-d", "--data", "--data-raw", "--data-binary":
 			i++
 			body = []byte(tokens[i])
-			if method == "GET" {
-				method = "POST"
+			if method == http.MethodGet {
+				method = http.MethodPost
+			}
+			if contentTypeHint == "" {
+				contentTypeHint = "application/x-www-form-urlencoded"
 			}
 
 		default:
@@ -108,6 +138,10 @@ func ParseCurl(tokens []string) (*http.Request, error) {
 				rawURL = t
 			}
 		}
+	}
+
+	if headers.Get("Content-Type") == "" && contentTypeHint != "" {
+		headers.Set("Content-Type", contentTypeHint)
 	}
 
 	if rawURL == "" {
@@ -128,48 +162,4 @@ func ParseCurl(tokens []string) (*http.Request, error) {
 
 	req.Header = headers
 	return req, nil
-}
-
-//
-// --- Tokenizer for curl-like shell commands ---
-//
-
-func shellTokens(s string) ([]string, error) {
-	var out []string
-	var buf strings.Builder
-	inQuote := false
-	quoteChar := byte(0)
-
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-
-		switch c {
-		case ' ', '\t', '\n':
-			if inQuote {
-				buf.WriteByte(c)
-			} else if buf.Len() > 0 {
-				out = append(out, buf.String())
-				buf.Reset()
-			}
-		case '\'', '"':
-			if inQuote {
-				if c == quoteChar {
-					inQuote = false
-				} else {
-					buf.WriteByte(c)
-				}
-			} else {
-				inQuote = true
-				quoteChar = c
-			}
-		default:
-			buf.WriteByte(c)
-		}
-	}
-
-	if buf.Len() > 0 {
-		out = append(out, buf.String())
-	}
-
-	return out, nil
 }
