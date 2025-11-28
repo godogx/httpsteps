@@ -3,7 +3,7 @@ module github.com/godogx/httpsteps
 go 1.18
 
 require (
-	github.com/bool64/dev v0.2.36
+	github.com/bool64/dev v0.2.43
 	github.com/bool64/httpmock v0.1.15
 	github.com/bool64/shared v0.1.5
 	github.com/cenkalti/backoff/v4 v4.2.1

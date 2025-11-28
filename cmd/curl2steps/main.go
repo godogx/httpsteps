@@ -1,7 +1,9 @@
+// Package main is a CLI tool to generate steps from curl command.
 package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -16,17 +18,23 @@ import (
 func main() {
 	if len(os.Args) < 2 || os.Args[1] == "-h" {
 		fmt.Println("Usage: curl2steps [service-name] <curl command>")
+
 		return
 	}
 
 	serviceName := os.Args[1]
 	offset := 2
+
 	if serviceName == "curl" {
 		serviceName = ""
 		offset = 1
 	}
 
-	req, err := parseCurl(os.Args[offset:])
+	buildSteps(serviceName, os.Args[offset:])
+}
+
+func buildSteps(serviceName string, curlArgs []string) {
+	req, err := parseCurl(curlArgs)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -34,6 +42,7 @@ func main() {
 	baseURL := req.URL.Scheme + "://" + req.URL.Hostname()
 	method := req.Method
 	path := req.URL.Path
+
 	if serviceName == "" {
 		serviceName = baseURL
 	}
@@ -69,9 +78,8 @@ func main() {
 
 		if req.Header.Get("Content-Type") == "application/json" {
 			fmt.Printf("    And I request %q HTTP endpoint with body\n", serviceName)
-			fmt.Printf(fmt.Sprintf("    ```json\n    %s\n    ```\n", string(body)))
+			fmt.Printf("    ```json\n    %s\n    ```\n", string(body))
 		}
-
 	}
 }
 
@@ -80,6 +88,7 @@ func printTable(t map[string][]string) {
 	for k := range t {
 		keys = append(keys, k)
 	}
+
 	sort.Strings(keys)
 
 	for _, k := range keys {
@@ -92,7 +101,7 @@ func printTable(t map[string][]string) {
 }
 
 // parseCurl takes a raw curl command and converts it into an *http.Request.
-func parseCurl(tokens []string) (*http.Request, error) {
+func parseCurl(tokens []string) (*http.Request, error) { //nolint:funlen
 	var (
 		method          = http.MethodGet
 		rawURL          string
@@ -117,17 +126,21 @@ func parseCurl(tokens []string) (*http.Request, error) {
 			i++
 			h := tokens[i]
 			parts := strings.SplitN(h, ":", 2)
+
 			if len(parts) != 2 {
 				return nil, errors.New("invalid header: " + h)
 			}
+
 			headers.Set(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
 
 		case "-d", "--data", "--data-raw", "--data-binary":
 			i++
 			body = []byte(tokens[i])
+
 			if method == http.MethodGet {
 				method = http.MethodPost
 			}
+
 			if contentTypeHint == "" {
 				contentTypeHint = "application/x-www-form-urlencoded"
 			}
@@ -155,11 +168,12 @@ func parseCurl(tokens []string) (*http.Request, error) {
 
 	bodyReader := bytes.NewReader(body)
 
-	req, err := http.NewRequest(method, parsedURL.String(), bodyReader)
+	req, err := http.NewRequestWithContext(context.Background(), method, parsedURL.String(), bodyReader)
 	if err != nil {
 		return nil, err
 	}
 
 	req.Header = headers
+
 	return req, nil
 }

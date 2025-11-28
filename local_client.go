@@ -247,7 +247,7 @@ func (l *LocalClient) afterScenario(ctx context.Context, _ *godog.Scenario, _ er
 	}
 
 	if len(errs) > 0 {
-		return ctx, errors.New(strings.Join(errs, "\n")) //nolint:goerr113
+		return ctx, errors.New(strings.Join(errs, "\n"))
 	}
 
 	return ctx, nil
