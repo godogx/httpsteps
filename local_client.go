@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -216,6 +217,7 @@ func (l *LocalClient) RegisterSteps(s *godog.ScenarioContext) {
 	s.Step(`^I should have(.*) response with body, that matches JSON from file$`, l.iShouldHaveResponseWithBodyThatMatchesJSONFromFile)
 	s.Step(`^I should have(.*) response with body, that matches JSON$`, l.iShouldHaveResponseWithBodyThatMatchesJSON)
 	s.Step(`^I should have(.*) response with body, that matches JSON paths$`, l.iShouldHaveResponseWithBodyThatMatchesJSONPaths)
+	s.Step(`^I should have(.*) response with body, that matches regular expression$`, l.iShouldHaveResponseWithBodyThatMatchesRegexp)
 
 	s.Step(`^I should have(.*) other responses with status "([^"]*)"$`, l.iShouldHaveOtherResponsesWithStatus)
 	s.Step(`^I should have(.*) other responses with header "([^"]*): ([^"]*)"$`, l.iShouldHaveOtherResponsesWithHeader)
@@ -226,6 +228,7 @@ func (l *LocalClient) RegisterSteps(s *godog.ScenarioContext) {
 	s.Step(`^I should have(.*) other responses with body, that matches JSON$`, l.iShouldHaveOtherResponsesWithBodyThatMatchesJSON)
 	s.Step(`^I should have(.*) other responses with body, that matches JSON from file$`, l.iShouldHaveOtherResponsesWithBodyThatMatchesJSONFromFile)
 	s.Step(`^I should have(.*) other responses with body, that matches JSON paths$`, l.iShouldHaveOtherResponsesWithBodyThatMatchesJSONPaths)
+	s.Step(`^I should have(.*) other responses with body, that matches regular expression$`, l.iShouldHaveOtherResponsesWithBodyThatMatchesRegexp)
 
 	s.After(l.afterScenario)
 }
@@ -767,6 +770,99 @@ func (l *LocalClient) iShouldHaveResponseWithBodyThatContains(ctx context.Contex
 	})
 }
 
+func (l *LocalClient) iShouldHaveResponseWithBodyThatMatchesRegexp(ctx context.Context, service, bodyDoc string) (context.Context, error) {
+	ctx = l.VS.PrepareContext(ctx)
+
+	return l.expectResponse(ctx, service, func(c *httpmock.Client) error {
+		return c.ExpectResponseBodyCallback(func(received []byte) error {
+			return l.matches(ctx, received, bodyDoc)
+		})
+	})
+}
+
+func (l *LocalClient) matches(ctx context.Context, received []byte, pattern string) error {
+	capture, matched, err := l.extractNamedMatches(received, pattern)
+	if err != nil {
+		return err
+	}
+
+	if !matched {
+		return augmentBodyErr(ctx, fmt.Errorf("%w %q in %q", errDoesNotContain, pattern, received))
+	}
+
+	_, vs := l.VS.Vars(ctx)
+
+	for k, v := range capture {
+		k := "$" + k
+
+		_, err := l.varCollected(vs, k, string(v))
+		if err != nil {
+			return augmentBodyErr(ctx, err)
+		}
+	}
+
+	return nil
+}
+
+func (l *LocalClient) extractNamedMatches(data []byte, pattern string) (map[string][]byte, bool, error) {
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, false, err
+	}
+
+	indices := re.FindSubmatchIndex(data)
+	if indices == nil {
+		return nil, false, nil // no full match
+	}
+
+	names := re.SubexpNames()
+	result := make(map[string][]byte, len(names)-1)
+
+	// i=0  → full match
+	// i≥1  → capture groups
+	for i, name := range names {
+		if i == 0 || name == "" {
+			continue // skip whole match and unnamed groups
+		}
+
+		start, end := indices[i*2], indices[i*2+1]
+		if start == -1 {
+			result[name] = nil // optional group didn't match
+
+			continue
+		}
+
+		result[name] = data[start:end] // zero-copy []byte slice
+	}
+
+	return result, true, nil
+}
+
+func (l *LocalClient) varCollected(vs *shared.Vars, s string, v interface{}) (bool, error) {
+	if vs == nil || !vs.IsVar(s) {
+		return false, nil
+	}
+
+	if n, ok := v.(json.Number); ok {
+		v = shared.DecodeJSONNumber(n)
+	} else if f, ok := v.(float64); ok && f == float64(int64(f)) {
+		v = int64(f)
+	}
+
+	fv, found := vs.Get(s)
+	if !found {
+		vs.Set(s, v)
+
+		return true, nil
+	}
+
+	if fv != v {
+		return false, fmt.Errorf("unexpected variable %s value, expected %v, received %v", s, fv, v)
+	}
+
+	return false, nil
+}
+
 func (l *LocalClient) iShouldHaveOtherResponsesWithBodyThatContains(ctx context.Context, service, bodyDoc string) (context.Context, error) {
 	ctx = l.VS.PrepareContext(ctx)
 
@@ -861,6 +957,16 @@ func (l *LocalClient) iShouldHaveOtherResponsesWithBodyThatMatchesJSONPaths(ctx 
 	return l.expectResponse(ctx, service, func(c *httpmock.Client) error {
 		return c.ExpectOtherResponsesBodyCallback(func(received []byte) error {
 			return augmentBodyErr(l.VS.AssertJSONPaths(ctx, jsonPaths, received, true))
+		})
+	})
+}
+
+func (l *LocalClient) iShouldHaveOtherResponsesWithBodyThatMatchesRegexp(ctx context.Context, service, bodyDoc string) (context.Context, error) {
+	ctx = l.VS.PrepareContext(ctx)
+
+	return l.expectResponse(ctx, service, func(c *httpmock.Client) error {
+		return c.ExpectOtherResponsesBodyCallback(func(received []byte) error {
+			return l.matches(ctx, received, bodyDoc)
 		})
 	})
 }

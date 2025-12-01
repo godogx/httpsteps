@@ -205,6 +205,15 @@ Another flavour of JSON matching is to match only specific fields with [JSON Pat
     | $[0].dyn | "$dyn"   |
 ```
 
+Response body can be matched with regular expression, named matches are treated as variables.
+
+```gherkin
+    And I should have "some-service" response with body, that matches regular expression
+    """
+    "time"\s*:\s*"(?P<year>\d{4})
+    """
+```
+
 ```gherkin
 
 Status can be defined with either phrase or numeric code.

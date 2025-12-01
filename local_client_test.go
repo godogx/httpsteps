@@ -10,7 +10,8 @@ import (
 
 	"github.com/bool64/httpmock"
 	"github.com/cucumber/godog"
-	httpsteps "github.com/godogx/httpsteps"
+	"github.com/godogx/httpsteps"
+	"github.com/godogx/vars"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -26,6 +27,7 @@ func TestLocal_RegisterSteps(t *testing.T) {
 	concurrencyLevel := 5
 	setExpectations(mock, concurrencyLevel)
 
+	vs := vars.Steps{}
 	local := httpsteps.NewLocalClient(srvURL, func(client *httpmock.Client) {
 		client.Headers = map[string]string{
 			"X-Foo": "bar",
@@ -36,6 +38,7 @@ func TestLocal_RegisterSteps(t *testing.T) {
 
 	suite := godog.TestSuite{
 		ScenarioInitializer: func(s *godog.ScenarioContext) {
+			vs.Register(s)
 			local.RegisterSteps(s)
 		},
 		Options: &godog.Options{
@@ -226,10 +229,12 @@ func TestLocal_RegisterSteps_dynamic(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	vs := vars.Steps{}
 	local := httpsteps.NewLocalClient(srv.URL)
 
 	suite := godog.TestSuite{
 		ScenarioInitializer: func(s *godog.ScenarioContext) {
+			vs.Register(s)
 			local.RegisterSteps(s)
 		},
 		Options: &godog.Options{
