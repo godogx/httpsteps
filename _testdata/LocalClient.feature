@@ -67,6 +67,13 @@ Feature: HTTP Service
     """
     "status":"failed"
     """
+    And I should have other responses with body, that matches regular expression
+    """
+    "error"\s*:\s*"(?P<errorMessage>[A-Za-z]+)"
+    """
+
+    And variable $errorMessage equals to "foo"
+
 
     And I should have other responses with header "Content-Type: application/json"
 

@@ -24,6 +24,13 @@ Feature: Dynamic data is used in steps
     "id":"$user_id"
     """
 
+    And I should have response with body, that matches regular expression
+    """
+    "name"\s*:\s*"(?P<first_name>\w+)
+    """
+
+    And variable $first_name equals to "John"
+
     # Creating an order for that user with $user_id.
     When I request HTTP endpoint with method "POST" and URI "/order/$user_id/?user_id=$user_id"
     And I request HTTP endpoint with header "X-UserId: $user_id"
