@@ -2,6 +2,12 @@
 
 This tool converts `curl` command to steps.
 
+## Install
+
+```
+go install github.com/godogx/httpsteps/cmd/curl2steps@latest
+```
+
 ## Examples
 
 ```

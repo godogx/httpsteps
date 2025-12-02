@@ -20,6 +20,8 @@ Client does not attempt to limit concurrency of multiple `godog` scenarios, it i
 the service is capable to process multiple scenarios simultaneously, or scenarios are 
 [synchronized explicitly](https://github.com/godogx/resource#steps).
 
+If you have a `curl` command with relevant request, you can convert it to steps with [`curl2steps`](./cmd/curl2steps).
+
 #### Request Setup
 
 ```gherkin
