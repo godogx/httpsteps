@@ -95,7 +95,10 @@ func printTable(t map[string][]string) {
 		v := t[k]
 
 		for _, vv := range v {
-			fmt.Printf("        | %s | %s |\n", k, vv)
+			fmt.Printf("        | %s | %s |\n",
+				strings.ReplaceAll(k, "|", `\|`),
+				strings.ReplaceAll(vv, "|", `\|`),
+			)
 		}
 	}
 }
