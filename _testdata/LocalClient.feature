@@ -20,8 +20,10 @@ Feature: HTTP Service
   Scenario: Bad request
     When I request HTTP endpoint with method "DELETE" and URI "/bad-request"
     And I request HTTP endpoint with header "X-Foo: bar"
-    And I request HTTP endpoint with cookie "c1: v1"
-    And I request HTTP endpoint with cookie "c2: v2"
+    And I request HTTP endpoint with cookies from file
+    """
+    _testdata/cookies.table
+    """
     Then I should have response with status "Bad Request"
     And I should have response with body from file
     """
