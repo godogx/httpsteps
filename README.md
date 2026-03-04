@@ -57,6 +57,15 @@ And I request "some-service" HTTP endpoint with headers
   | X-Bar | 123 |
 ```
 
+Or use a pipe-delimited `.table` or CSV `.csv` file.
+
+```gherkin
+And I request "some-service" HTTP endpoint with headers from file
+"""
+path/to/file.table
+"""  
+```
+
 An additional cookie can be supplied. For multiple cookies, call step multiple times.
 
 ```gherkin
@@ -72,6 +81,15 @@ Or use table of values.
 And I request "some-service" HTTP endpoint with cookies
   | cfoo | foo |
   | cbar | 123 |
+```
+
+Or use a pipe-delimited `.table` or CSV `.csv` file.
+
+```gherkin
+And I request "some-service" HTTP endpoint with cookies from file
+"""
+path/to/file.csv
+"""  
 ```
 
 Optionally request body can be configured. If body is a valid JSON5 payload, it will be converted to JSON before use.
@@ -103,6 +121,15 @@ And I request "some-service" HTTP endpoint with urlencoded form data
   | ffoo | abc |
   | fbar | 123 |
   | fbar | 456 |
+```
+
+Or use a pipe-delimited `.table` or CSV `.csv` file.
+
+```gherkin
+And I request "some-service" HTTP endpoint with urlencoded form data from file
+"""
+path/to/file.table
+"""  
 ```
 
 

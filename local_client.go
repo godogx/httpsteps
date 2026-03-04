@@ -3,6 +3,7 @@ package httpsteps
 import (
 	"bytes"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -200,6 +201,11 @@ func (l *LocalClient) RegisterSteps(s *godog.ScenarioContext) {
 	s.Step(`^I request(.*) HTTP endpoint with query parameters$`, l.iRequestWithQueryParameters)
 	s.Step(`^I request(.*) HTTP endpoint with urlencoded form data$`, l.iRequestWithFormDataParameters)
 
+	s.Step(`^I request(.*) HTTP endpoint with cookies from file$`, l.iRequestWithCookiesFromFile)
+	s.Step(`^I request(.*) HTTP endpoint with headers from file$`, l.iRequestWithHeadersFromFile)
+	s.Step(`^I request(.*) HTTP endpoint with query parameters from file$`, l.iRequestWithQueryParametersFromFile)
+	s.Step(`^I request(.*) HTTP endpoint with urlencoded form data from file$`, l.iRequestWithFormDataParametersFromFile)
+
 	s.Step(`^I follow redirects from(.*) HTTP endpoint$`, l.iFollowRedirects)
 	s.Step(`^I retry(.*) HTTP request up to (\d+ time[s]?|.*)$`, l.iRetry)
 	s.Step(`^I concurrently request idempotent(.*) HTTP endpoint$`, l.iRequestWithConcurrency)
@@ -385,6 +391,76 @@ func (l *LocalClient) iRequestWithHeader(ctx context.Context, service, key, valu
 	return ctx, nil
 }
 
+func mapOfCSVFile(fn string) (url.Values, error) {
+	d, err := os.ReadFile(fn)
+	if err != nil {
+		return nil, err
+	}
+
+	r := csv.NewReader(bytes.NewReader(d))
+
+	rows, err := r.ReadAll()
+	if err != nil {
+		return nil, err
+	}
+
+	res := make(url.Values, len(rows))
+
+	for _, l := range rows {
+		if len(l) != 2 {
+			return nil, fmt.Errorf("%w, 2 expected, %d received",
+				errInvalidNumberOfColumns, len(l))
+		}
+
+		k := l[0]
+		v := l[1]
+
+		res[k] = append(res[k], v)
+	}
+
+	return res, nil
+}
+
+func mapOfTableFile(fn string) (url.Values, error) {
+	if strings.HasSuffix(fn, ".csv") {
+		return mapOfCSVFile(fn)
+	}
+
+	if !strings.HasSuffix(fn, ".table") {
+		return nil, fmt.Errorf("unsupported file, *.table or *.csv expected: %s", fn)
+	}
+
+	d, err := os.ReadFile(fn)
+	if err != nil {
+		return nil, err
+	}
+
+	res := make(url.Values)
+
+	for _, l := range bytes.Split(d, []byte("\n")) {
+		l := strings.TrimSpace(string(l))
+
+		if len(l) == 0 {
+			continue
+		}
+
+		l = strings.Trim(l, `|`)
+		p := strings.Split(l, "|")
+
+		if len(p) != 2 {
+			return nil, fmt.Errorf("%w, 2 expected, %d received",
+				errInvalidNumberOfColumns, len(p))
+		}
+
+		k := strings.TrimSpace(p[0])
+		v := strings.TrimSpace(p[1])
+
+		res[k] = append(res[k], v)
+	}
+
+	return res, nil
+}
+
 func mapOfData(data *godog.Table) (url.Values, error) {
 	if len(data.Rows[0].Cells) != 2 {
 		return nil, fmt.Errorf("%w, 2 expected, %d received",
@@ -402,7 +478,21 @@ func mapOfData(data *godog.Table) (url.Values, error) {
 	return res, nil
 }
 
-func (l *LocalClient) tableSetup(
+func (l *LocalClient) fileTableSetup(
+	ctx context.Context,
+	fn string,
+	receiverName string,
+	receiver func(name, value string) *httpmock.Client,
+) (context.Context, error) {
+	m, err := mapOfTableFile(fn)
+	if err != nil {
+		return ctx, err
+	}
+
+	return l.tableSetup(ctx, m, receiverName, receiver)
+}
+
+func (l *LocalClient) godogTableSetup(
 	ctx context.Context,
 	data *godog.Table,
 	receiverName string,
@@ -413,7 +503,19 @@ func (l *LocalClient) tableSetup(
 		return ctx, err
 	}
 
-	var rv []byte
+	return l.tableSetup(ctx, m, receiverName, receiver)
+}
+
+func (l *LocalClient) tableSetup(
+	ctx context.Context,
+	m url.Values,
+	receiverName string,
+	receiver func(name, value string) *httpmock.Client,
+) (context.Context, error) {
+	var (
+		err error
+		rv  []byte
+	)
 
 	ctx = l.VS.PrepareContext(ctx)
 
@@ -437,7 +539,16 @@ func (l *LocalClient) iRequestWithFormDataParameters(ctx context.Context, servic
 		return ctx, err
 	}
 
-	return l.tableSetup(ctx, data, "form data parameter", c.WithURLEncodedFormDataParam)
+	return l.godogTableSetup(ctx, data, "form data parameter", c.WithURLEncodedFormDataParam)
+}
+
+func (l *LocalClient) iRequestWithFormDataParametersFromFile(ctx context.Context, service string, filePath string) (context.Context, error) {
+	c, ctx, err := l.Service(ctx, service)
+	if err != nil {
+		return ctx, err
+	}
+
+	return l.fileTableSetup(ctx, filePath, "form data parameter", c.WithURLEncodedFormDataParam)
 }
 
 func (l *LocalClient) iRequestWithQueryParameters(ctx context.Context, service string, data *godog.Table) (context.Context, error) {
@@ -446,7 +557,16 @@ func (l *LocalClient) iRequestWithQueryParameters(ctx context.Context, service s
 		return ctx, err
 	}
 
-	return l.tableSetup(ctx, data, "query parameter", c.WithQueryParam)
+	return l.godogTableSetup(ctx, data, "query parameter", c.WithQueryParam)
+}
+
+func (l *LocalClient) iRequestWithQueryParametersFromFile(ctx context.Context, service string, filePath string) (context.Context, error) {
+	c, ctx, err := l.Service(ctx, service)
+	if err != nil {
+		return ctx, err
+	}
+
+	return l.fileTableSetup(ctx, filePath, "query parameter", c.WithQueryParam)
 }
 
 func (l *LocalClient) iRequestWithHeaders(ctx context.Context, service string, data *godog.Table) (context.Context, error) {
@@ -455,7 +575,16 @@ func (l *LocalClient) iRequestWithHeaders(ctx context.Context, service string, d
 		return ctx, err
 	}
 
-	return l.tableSetup(ctx, data, "header", c.WithHeader)
+	return l.godogTableSetup(ctx, data, "header", c.WithHeader)
+}
+
+func (l *LocalClient) iRequestWithHeadersFromFile(ctx context.Context, service string, filePath string) (context.Context, error) {
+	c, ctx, err := l.Service(ctx, service)
+	if err != nil {
+		return ctx, err
+	}
+
+	return l.fileTableSetup(ctx, filePath, "header", c.WithHeader)
 }
 
 func (l *LocalClient) iRequestWithCookie(ctx context.Context, service, name, value string) (context.Context, error) {
@@ -480,7 +609,16 @@ func (l *LocalClient) iRequestWithCookies(ctx context.Context, service string, d
 		return ctx, err
 	}
 
-	return l.tableSetup(ctx, data, "cookie", c.WithCookie)
+	return l.godogTableSetup(ctx, data, "cookie", c.WithCookie)
+}
+
+func (l *LocalClient) iRequestWithCookiesFromFile(ctx context.Context, service string, filePath string) (context.Context, error) {
+	c, ctx, err := l.Service(ctx, service)
+	if err != nil {
+		return ctx, err
+	}
+
+	return l.fileTableSetup(ctx, filePath, "cookie", c.WithCookie)
 }
 
 func (l *LocalClient) iRequestWithAttachment(ctx context.Context, service, fieldName, fileName string, fileContent string) (context.Context, error) {
